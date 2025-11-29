@@ -17,6 +17,7 @@ import shutil
 from datetime import datetime
 import threading
 import socket
+import webbrowser
 
 if getattr(sys, 'frozen', False):
     CONFIG_DIR = Path(sys.executable).parent / "data"
@@ -117,6 +118,10 @@ class App:
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(side=tk.TOP, padx=2, pady=5, fill=tk.X)
         ttk.Button(btn_frame, text='导出', command=self.export_configs).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
         ttk.Button(btn_frame, text='导入', command=self.import_configs).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(side=tk.TOP, padx=2, pady=5, fill=tk.X)
+        feedback_label = tk.Label(btn_frame, text='反馈: GitHub Issues', fg='blue', cursor='hand2', font=('微软雅黑', 9))
+        feedback_label.pack(side=tk.TOP, padx=2, pady=5)
+        feedback_label.bind('<Button-1>', lambda e: webbrowser.open('https://github.com/LiangMu-Studio/API_control/issues'))
 
         # 下侧：终端
         bottom_frame = ttk.Frame(root)

@@ -105,4 +105,4 @@ A: 主要支持 Windows（PowerShell/CMD）。其他系统需要配置相应的�
 - 当前版本：0.8
 - 许可证：GPL v3
 - 开发者：LiangMu-Studio
-- 反馈：[Issues](https://github.com/your-username/your-repo/issues)
+- 反馈：[Issues](https://github.com/LiangMu-Studio/API_control/issues)

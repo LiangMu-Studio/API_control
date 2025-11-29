@@ -3,7 +3,7 @@
 # Licensed under GPL v3
 # See LICENSE file for details
 
-VERSION = "0.8"
+VERSION = "0.9"
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -27,6 +27,64 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 CONFIG_DIR.mkdir(exist_ok=True)
 
+def detect_python_envs():
+    """检测系统中的Python环境"""
+    python_envs = {}
+
+    # 检测conda环境
+    try:
+        result = subprocess.run(['conda', 'env', 'list'],
+                              capture_output=True, text=True, check=True)
+        lines = result.stdout.split('\n')
+        for line in lines:
+            # 只显示有效的conda环境，过滤掉注释行和空行
+            if not line.strip().startswith('#') and line.strip():
+                parts = line.split()
+                if len(parts) >= 2:
+                    env_name = parts[0]
+                    env_path = parts[-1]
+
+                    # 只显示你关心的环境，避免重复
+                    if env_name in ['base', 'python_learning']:
+                        # 检查是否是当前环境
+                        is_current = '*' in line
+                        python_envs[env_name] = {
+                            'type': 'conda',
+                            'path': env_path,
+                            'is_current': is_current
+                        }
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # 只检测非conda环境的Python安装
+    standard_pythons = []
+    python_paths = []
+
+    # 从PATH中查找Python，但排除conda目录中的Python
+    for path in os.environ['PATH'].split(os.pathsep):
+        python_exe = os.path.join(path, 'python.exe')
+        if os.path.exists(python_exe):
+            # 检查是否在conda目录中，如果是则跳过
+            if 'anaconda' not in path.lower() and 'conda' not in path.lower():
+                python_paths.append(python_exe)
+
+    # 去重并添加到列表
+    for python_path in list(set(python_paths)):
+        try:
+            result = subprocess.run([python_path, '--version'],
+                                  capture_output=True, text=True, check=True)
+            version = result.stdout.strip().replace('Python ', '')
+            env_name = f"Python {version}"
+            python_envs[env_name] = {
+                'type': 'standard',
+                'path': python_path,
+                'is_current': False
+            }
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+
+    return python_envs
+
 def detect_terminals():
     terminals = {}
     if shutil.which('pwsh'):
@@ -41,13 +99,30 @@ def load_settings():
     if SETTINGS_FILE.exists():
         with open(SETTINGS_FILE, 'r') as f:
             data = json.load(f)
-            if 'terminals' in data:
+            # 如果设置文件是旧格式（没有python_envs），需要更新
+            if 'terminals' in data and 'python_envs' not in data:
+                python_envs = detect_python_envs()
+                default_python_env = list(python_envs.keys())[0] if python_envs else None
+                data['python_envs'] = python_envs
+                data['default_python_env'] = default_python_env
+                save_settings(data)
+                return data
+            elif 'terminals' in data:
                 return data
     terminals = detect_terminals()
+    python_envs = detect_python_envs()
+
     if not terminals:
         terminals = {'CMD': 'cmd'}
     default_terminal = list(terminals.keys())[0]
-    settings = {'terminal': default_terminal, 'terminals': terminals}
+    default_python_env = list(python_envs.keys())[0] if python_envs else None
+
+    settings = {
+        'terminal': default_terminal,
+        'terminals': terminals,
+        'python_envs': python_envs,
+        'default_python_env': default_python_env
+    }
     save_settings(settings)
     return settings
 
@@ -140,6 +215,12 @@ class App:
 
         ttk.Button(term_frame, text='+ 添加其他终端', command=self.add_terminal_dialog).pack(side=tk.LEFT, padx=2)
         ttk.Button(term_frame, text='刷新终端列表', command=self.refresh_terminals).pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(term_frame, text='Python环境:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
+        self.python_env_var = tk.StringVar(value=self.settings.get('default_python_env', ''))
+        self.python_env_combo = ttk.Combobox(term_frame, textvariable=self.python_env_var, values=list(self.settings.get('python_envs', {}).keys()), width=20, state='readonly')
+        self.python_env_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Button(term_frame, text='刷新环境列表', command=self.refresh_python_envs).pack(side=tk.LEFT, padx=2)
 
         ttk.Label(term_frame, text='当前KEY:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
         self.current_key_label = ttk.Label(term_frame, text='未选择', font=('微软雅黑', 10), foreground='blue')
@@ -425,6 +506,28 @@ class App:
                     save_configs(self.configs)
                     self.refresh_list()
 
+    def get_python_activation_command(self, python_env_name):
+        """获取Python环境激活命令"""
+        if not python_env_name or python_env_name not in self.settings.get('python_envs', {}):
+            return ""
+
+        python_env_info = self.settings['python_envs'][python_env_name]
+        env_type = python_env_info['type']
+        env_path = python_env_info['path']
+
+        if env_type == 'conda':
+            # 对于conda环境，使用conda activate命令（不要加&&，让终端保持打开）
+            if python_env_name == 'base':
+                return "conda activate base"
+            else:
+                return f"conda activate {python_env_name}"
+        elif env_type == 'standard':
+            python_dir = os.path.dirname(env_path)
+            if os.path.exists(os.path.join(python_dir, 'activate')):
+                return f"call \"{os.path.join(python_dir, 'activate')}\" && "
+
+        return ""
+
     def open_terminal(self):
         if not self.selected_config_id:
             messagebox.showerror('错误', '请选择配置')
@@ -443,6 +546,7 @@ class App:
             messagebox.showerror('错误', '选择的终端不可用')
             return
         terminal_cmd = self.available_terminals[terminal_name]
+        python_env_name = self.python_env_var.get()
 
         try:
             env = os.environ.copy()
@@ -454,12 +558,67 @@ class App:
             cwd = work_dir if (work_dir and os.path.isdir(work_dir)) else None
 
             if sys.platform == 'win32':
+                # 生成激活命令
+                activation_cmd = self.get_python_activation_command(python_env_name)
+
+                # 详细调试输出
+                print("=========================================")
+                print("=== 终端打开调试信息 ===")
+                print(f"选择的Python环境: {python_env_name}")
+                print(f"激活命令: '{activation_cmd}'")
+                print(f"终端类型: {terminal_name}")
+                print(f"终端命令: {terminal_cmd}")
+                print(f"API密钥: {key_name}")
+                print(f"端点: {endpoint}")
+                print(f"工作目录: {cwd}")
+                print("=========================================")
+
                 if terminal_cmd == 'pwsh':
-                    subprocess.Popen(['pwsh', '-NoExit'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    if activation_cmd:
+                        # 只在选择Anthropic提供商时自动进入Claude
+                        is_anthropic = config['provider'].get('type') == 'anthropic'
+
+                        if endpoint:
+                            cmd_suffix = '; claude' if is_anthropic else ''
+                            full_cmd = f'$env:{key_name}="{api_key}"; $env:ANTHROPIC_BASE_URL="{endpoint}"; {activation_cmd}{cmd_suffix}'
+                        else:
+                            cmd_suffix = '; claude' if is_anthropic else ''
+                            full_cmd = f'$env:{key_name}="{api_key}"; {activation_cmd}{cmd_suffix}'
+                        print(f"PowerShell完整命令: {full_cmd}")
+                        subprocess.Popen(['pwsh', '-NoExit', '-Command', full_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        subprocess.Popen(['pwsh', '-NoExit'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 elif terminal_cmd == 'powershell':
-                    subprocess.Popen(['powershell', '-NoExit'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    if activation_cmd:
+                        # 只在选择Anthropic提供商时自动进入Claude
+                        is_anthropic = config['provider'].get('type') == 'anthropic'
+
+                        if endpoint:
+                            cmd_suffix = '; claude' if is_anthropic else ''
+                            full_cmd = f'$env:{key_name}="{api_key}"; $env:ANTHROPIC_BASE_URL="{endpoint}"; {activation_cmd}{cmd_suffix}'
+                        else:
+                            cmd_suffix = '; claude' if is_anthropic else ''
+                            full_cmd = f'$env:{key_name}="{api_key}"; {activation_cmd}{cmd_suffix}'
+                        print(f"PowerShell完整命令: {full_cmd}")
+                        subprocess.Popen(['powershell', '-NoExit', '-Command', full_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        subprocess.Popen(['powershell', '-NoExit'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 else:
-                    subprocess.Popen(terminal_cmd, env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    # CMD
+                    if activation_cmd:
+                        # 只在选择Anthropic提供商时自动进入Claude
+                        is_anthropic = config['provider'].get('type') == 'anthropic'
+
+                        if endpoint:
+                            cmd_suffix = ' && claude' if is_anthropic else ''
+                            full_cmd = f'set "{key_name}={api_key}" && set ANTHROPIC_BASE_URL={endpoint} && {activation_cmd}{cmd_suffix}'
+                        else:
+                            cmd_suffix = ' && claude' if is_anthropic else ''
+                            full_cmd = f'set "{key_name}={api_key}" && {activation_cmd}{cmd_suffix}'
+                        print(f"CMD完整命令: {full_cmd}")
+                        subprocess.Popen(['cmd', '/k', full_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        subprocess.Popen(['cmd', '/k'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
             else:
                 subprocess.Popen(terminal_cmd, env=env, cwd=cwd, shell=True)
         except Exception as e:
@@ -481,6 +640,31 @@ class App:
         if self.available_terminals:
             self.terminal_var.set(list(self.available_terminals.keys())[0])
         messagebox.showinfo('成功', '终端列表已刷新')
+
+    def refresh_python_envs(self):
+        """刷新Python环境列表"""
+        new_python_envs = detect_python_envs()
+        self.settings['python_envs'] = new_python_envs
+
+        # 如果当前选择的环境不存在了，选择第一个可用的
+        current_selection = self.python_env_var.get()
+        if current_selection not in new_python_envs:
+            if new_python_envs:
+                self.python_env_var.set(list(new_python_envs.keys())[0])
+            else:
+                self.python_env_var.set('')
+
+        # 更新设置文件
+        self.settings['default_python_env'] = self.python_env_var.get()
+        save_settings(self.settings)
+
+        # 更新下拉列表
+        self.python_env_combo['values'] = list(new_python_envs.keys())
+
+        if new_python_envs:
+            messagebox.showinfo('成功', f'Python环境列表已刷新，发现 {len(new_python_envs)} 个环境')
+        else:
+            messagebox.showwarning('警告', '没有找到Python环境')
 
     def add_terminal_dialog(self):
         dialog = tk.Toplevel(self.root)

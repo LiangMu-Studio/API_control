@@ -1717,26 +1717,18 @@ def main(page: ft.Page):
                 save_configs(configs)
                 refresh_config_list()
         elif selected_endpoint:
-            # 二级：端点在同CLI内移动
+            # 二级：端点在同CLI内移动（重排配置项顺序）
             cli, ep = selected_endpoint.split(':', 1)
             eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
             pos = eps.index(ep) if ep in eps else -1
             if pos > 0:
-                # 交换两个端点的所有配置项
                 prev_ep = eps[pos - 1]
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == ep:
-                            c['provider']['endpoint'] = '__temp__'
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == prev_ep:
-                            c['provider']['endpoint'] = ep
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == '__temp__':
-                            c['provider']['endpoint'] = prev_ep
-                selected_endpoint = f"{cli}:{prev_ep}"
+                # 重排：把当前端点的配置项移到前一个端点之前
+                ep_items = [c for c in configs if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+                other_items = [c for c in configs if not (c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep)]
+                # 找到prev_ep第一项的位置
+                insert_pos = next((i for i, c in enumerate(other_items) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == prev_ep), 0)
+                configs[:] = other_items[:insert_pos] + ep_items + other_items[insert_pos:]
                 save_configs(configs)
                 refresh_config_list()
         elif selected_cli:
@@ -1767,25 +1759,22 @@ def main(page: ft.Page):
                 save_configs(configs)
                 refresh_config_list()
         elif selected_endpoint:
-            # 二级：端点在同CLI内移动
+            # 二级：端点在同CLI内移动（重排配置项顺序）
             cli, ep = selected_endpoint.split(':', 1)
             eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
             pos = eps.index(ep) if ep in eps else -1
             if pos >= 0 and pos < len(eps) - 1:
                 next_ep = eps[pos + 1]
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == ep:
-                            c['provider']['endpoint'] = '__temp__'
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == next_ep:
-                            c['provider']['endpoint'] = ep
-                for c in configs:
-                    if c.get('cli_type') == cli:
-                        if c.get('provider', {}).get('endpoint') == '__temp__':
-                            c['provider']['endpoint'] = next_ep
-                selected_endpoint = f"{cli}:{next_ep}"
+                # 重排：把当前端点的配置项移到下一个端点之后
+                ep_items = [c for c in configs if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+                other_items = [c for c in configs if not (c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep)]
+                # 找到next_ep最后一项之后的位置
+                last_next = -1
+                for i, c in enumerate(other_items):
+                    if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == next_ep:
+                        last_next = i
+                insert_pos = last_next + 1 if last_next >= 0 else len(other_items)
+                configs[:] = other_items[:insert_pos] + ep_items + other_items[insert_pos:]
                 save_configs(configs)
                 refresh_config_list()
         elif selected_cli:

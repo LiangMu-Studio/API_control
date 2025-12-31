@@ -40,7 +40,7 @@ A simple and easy-to-use API key management tool that supports multiple API conf
 
 #### First Time Use
 
-1. **Launch Software** - Run `gui.py` or `LiangMu-API-Key.exe`
+1. **Launch Software** - Run `main.py` or `LiangMu-API-Key.exe`
 2. **Add Configuration** - Click "Add" button
 3. **Fill Information**
    - Label: Configuration name (e.g., "Claude API")
@@ -141,7 +141,7 @@ A: The software automatically detects if Windows Terminal is installed. When ava
 
 #### 第一次使用
 
-1. **启动软件** - 运行 `gui.py` 或 `LiangMu-API-Key.exe`
+1. **启动软件** - 运行 `main.py` 或 `LiangMu-API-Key.exe`
 2. **添加配置** - 点击"新增"按钮
 3. **填写信息**
    - 标签：配置的名称（如 "Claude API"）

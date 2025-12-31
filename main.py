@@ -3,7 +3,7 @@
 # Licensed under GPL v3
 # See LICENSE file for details
 
-VERSION = "0.9"
+VERSION = "1.0"
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -19,6 +19,130 @@ import threading
 import socket
 import webbrowser
 from git_bash_detector import find_git_bash, is_git_bash_available
+
+# 多语言支持
+LANG = {
+    'zh': {
+        'title': 'LiangMu-Studio API Key v{} - PowerShell 集成终端',
+        'api_config': 'API 密钥配置',
+        'add': '新增',
+        'edit': '编辑',
+        'delete': '删除',
+        'copy_key': '复制密钥',
+        'move_up': '↑ 上移',
+        'move_down': '↓ 下移',
+        'export': '导出',
+        'import': '导入',
+        'feedback': '反馈: GitHub Issues',
+        'terminal': '集成终端',
+        'select_terminal': '选择终端:',
+        'python_env': 'Python环境:',
+        'current_key': '当前KEY:',
+        'not_selected': '未选择',
+        'work_dir': '工作目录:',
+        'browse': '浏览',
+        'open_terminal': '打开终端',
+        'add_terminal': '+ 添加其他终端',
+        'refresh_terminals': '刷新终端列表',
+        'refresh_envs': '刷新环境列表',
+        'config_edit': '配置编辑',
+        'new_config': '新增配置',
+        'label': '标签:',
+        'provider': '提供商:',
+        'model': '模型:',
+        'api_addr': 'API地址:',
+        'key_name': 'KEY名称:',
+        'api_key': 'API密钥:',
+        'save': '保存',
+        'cancel': '取消',
+        'error': '错误',
+        'success': '成功',
+        'warning': '警告',
+        'tip': '提示',
+        'select_config': '请选择配置',
+        'fill_label_key': '请填写标签和API密钥',
+        'key_copied': '密钥已复制到剪贴板',
+        'terminal_unavailable': '选择的终端不可用',
+        'cannot_open_terminal': '无法打开终端: {}',
+        'select_work_dir': '选择工作目录',
+        'terminals_refreshed': '终端列表已刷新',
+        'envs_refreshed': 'Python环境列表已刷新，发现 {} 个环境',
+        'no_envs': '没有找到Python环境',
+        'add_custom_terminal': '添加自定义终端',
+        'terminal_name': '终端名称:',
+        'command': '命令:',
+        'fill_name_cmd': '请填写终端名称和命令',
+        'terminal_added': '终端已添加',
+        'exported_to': '配置已导出到: {}',
+        'export_failed': '导出失败: {}',
+        'no_config_data': '文件中没有配置数据',
+        'imported_count': '已导入 {} 个配置',
+        'import_failed': '导入失败: {}',
+        'dialog_open': '编辑对话框已打开，请先关闭',
+        'uncategorized': '未分类',
+        'lang_switch': '🌐 EN',
+    },
+    'en': {
+        'title': 'LiangMu-Studio API Key v{} - PowerShell Terminal',
+        'api_config': 'API Key Configuration',
+        'add': 'Add',
+        'edit': 'Edit',
+        'delete': 'Delete',
+        'copy_key': 'Copy Key',
+        'move_up': '↑ Up',
+        'move_down': '↓ Down',
+        'export': 'Export',
+        'import': 'Import',
+        'feedback': 'Feedback: GitHub Issues',
+        'terminal': 'Integrated Terminal',
+        'select_terminal': 'Terminal:',
+        'python_env': 'Python Env:',
+        'current_key': 'Current KEY:',
+        'not_selected': 'Not Selected',
+        'work_dir': 'Work Dir:',
+        'browse': 'Browse',
+        'open_terminal': 'Open Terminal',
+        'add_terminal': '+ Add Terminal',
+        'refresh_terminals': 'Refresh Terminals',
+        'refresh_envs': 'Refresh Envs',
+        'config_edit': 'Edit Config',
+        'new_config': 'New Config',
+        'label': 'Label:',
+        'provider': 'Provider:',
+        'model': 'Model:',
+        'api_addr': 'API URL:',
+        'key_name': 'KEY Name:',
+        'api_key': 'API Key:',
+        'save': 'Save',
+        'cancel': 'Cancel',
+        'error': 'Error',
+        'success': 'Success',
+        'warning': 'Warning',
+        'tip': 'Tip',
+        'select_config': 'Please select a config',
+        'fill_label_key': 'Please fill in label and API key',
+        'key_copied': 'Key copied to clipboard',
+        'terminal_unavailable': 'Selected terminal unavailable',
+        'cannot_open_terminal': 'Cannot open terminal: {}',
+        'select_work_dir': 'Select Work Directory',
+        'terminals_refreshed': 'Terminal list refreshed',
+        'envs_refreshed': 'Python env list refreshed, found {} envs',
+        'no_envs': 'No Python environments found',
+        'add_custom_terminal': 'Add Custom Terminal',
+        'terminal_name': 'Terminal Name:',
+        'command': 'Command:',
+        'fill_name_cmd': 'Please fill in name and command',
+        'terminal_added': 'Terminal added',
+        'exported_to': 'Config exported to: {}',
+        'export_failed': 'Export failed: {}',
+        'no_config_data': 'No config data in file',
+        'imported_count': 'Imported {} configs',
+        'import_failed': 'Import failed: {}',
+        'dialog_open': 'Edit dialog is open, please close it first',
+        'uncategorized': 'Uncategorized',
+        'lang_switch': '🌐 中文',
+    }
+}
 
 # Fix Tkinter data directory for PyInstaller
 if getattr(sys, 'frozen', False):
@@ -272,7 +396,9 @@ def save_configs(configs):
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title(f'LiangMu-Studio API Key v{VERSION} - PowerShell 集成终端')
+        self.lang = 'zh'  # 默认中文
+        self.L = LANG[self.lang]
+        self.root.title(self.L['title'].format(VERSION))
         self.root.geometry('1000x500')
         self.configs = load_configs()
         self.settings = load_settings()
@@ -284,11 +410,22 @@ class App:
         self.selected_config_id = None
         self.edit_dialog_open = False
 
+        # 保存控件引用用于语言切换
+        self.widgets = {}
+        self.build_ui()
+
+    def build_ui(self):
+        # 清除旧控件
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        L = self.L
         # 上侧：配置管理
-        top_frame = ttk.Frame(root)
+        top_frame = ttk.Frame(self.root)
         top_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(top_frame, text='API 密钥配置', font=('微软雅黑', 12, 'bold')).pack(side=tk.LEFT, padx=5)
+        self.widgets['api_config'] = ttk.Label(top_frame, text=L['api_config'], font=('微软雅黑', 12, 'bold'))
+        self.widgets['api_config'].pack(side=tk.LEFT, padx=5)
 
         # TreeView 替代 Listbox
         tree_frame = ttk.Frame(top_frame)
@@ -306,39 +443,57 @@ class App:
         # 按钮区域
         btn_frame = ttk.Frame(top_frame)
         btn_frame.pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        ttk.Button(btn_frame, text='新增', command=self.new_config).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='编辑', command=self.edit_config).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='删除', command=self.delete_config).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='复制密钥', command=self.copy_key).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='↑ 上移', command=self.move_up).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='↓ 下移', command=self.move_down).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_add'] = ttk.Button(btn_frame, text=L['add'], command=self.new_config)
+        self.widgets['btn_add'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_edit'] = ttk.Button(btn_frame, text=L['edit'], command=self.edit_config)
+        self.widgets['btn_edit'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_delete'] = ttk.Button(btn_frame, text=L['delete'], command=self.delete_config)
+        self.widgets['btn_delete'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_copy'] = ttk.Button(btn_frame, text=L['copy_key'], command=self.copy_key)
+        self.widgets['btn_copy'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_up'] = ttk.Button(btn_frame, text=L['move_up'], command=self.move_up)
+        self.widgets['btn_up'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_down'] = ttk.Button(btn_frame, text=L['move_down'], command=self.move_down)
+        self.widgets['btn_down'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(side=tk.TOP, padx=2, pady=5, fill=tk.X)
-        ttk.Button(btn_frame, text='导出', command=self.export_configs).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
-        ttk.Button(btn_frame, text='导入', command=self.import_configs).pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_export'] = ttk.Button(btn_frame, text=L['export'], command=self.export_configs)
+        self.widgets['btn_export'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+        self.widgets['btn_import'] = ttk.Button(btn_frame, text=L['import'], command=self.import_configs)
+        self.widgets['btn_import'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
         ttk.Separator(btn_frame, orient=tk.HORIZONTAL).pack(side=tk.TOP, padx=2, pady=5, fill=tk.X)
-        feedback_label = tk.Label(btn_frame, text='反馈: GitHub Issues', fg='blue', cursor='hand2', font=('微软雅黑', 9))
-        feedback_label.pack(side=tk.TOP, padx=2, pady=5)
-        feedback_label.bind('<Button-1>', lambda e: webbrowser.open('https://github.com/LiangMu-Studio/API_control/issues'))
+
+        # 语言切换按钮
+        self.widgets['btn_lang'] = ttk.Button(btn_frame, text=L['lang_switch'], command=self.switch_language)
+        self.widgets['btn_lang'].pack(side=tk.TOP, padx=2, pady=2, fill=tk.X)
+
+        self.widgets['feedback'] = tk.Label(btn_frame, text=L['feedback'], fg='blue', cursor='hand2', font=('微软雅黑', 9))
+        self.widgets['feedback'].pack(side=tk.TOP, padx=2, pady=5)
+        self.widgets['feedback'].bind('<Button-1>', lambda e: webbrowser.open('https://github.com/LiangMu-Studio/API_control/issues'))
 
         # 下侧：终端
-        bottom_frame = ttk.Frame(root)
+        bottom_frame = ttk.Frame(self.root)
         bottom_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(bottom_frame, text='集成终端', font=('微软雅黑', 11, 'bold')).pack(side=tk.TOP, padx=5, pady=5)
+        self.widgets['terminal_title'] = ttk.Label(bottom_frame, text=L['terminal'], font=('微软雅黑', 11, 'bold'))
+        self.widgets['terminal_title'].pack(side=tk.TOP, padx=5, pady=5)
 
         # 终端选择和管理
         term_frame = ttk.Frame(bottom_frame)
         term_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(term_frame, text='选择终端:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
+        self.widgets['lbl_terminal'] = ttk.Label(term_frame, text=L['select_terminal'], font=('微软雅黑', 10))
+        self.widgets['lbl_terminal'].pack(side=tk.LEFT, padx=5)
         self.terminal_var = tk.StringVar(value=self.settings.get('terminal', list(self.available_terminals.keys())[0] if self.available_terminals else 'CMD'))
         self.terminal_combo = ttk.Combobox(term_frame, textvariable=self.terminal_var, values=list(self.available_terminals.keys()), width=15, state='readonly')
         self.terminal_combo.pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(term_frame, text='+ 添加其他终端', command=self.add_terminal_dialog).pack(side=tk.LEFT, padx=2)
-        ttk.Button(term_frame, text='刷新终端列表', command=self.refresh_terminals).pack(side=tk.LEFT, padx=2)
+        self.widgets['btn_add_term'] = ttk.Button(term_frame, text=L['add_terminal'], command=self.add_terminal_dialog)
+        self.widgets['btn_add_term'].pack(side=tk.LEFT, padx=2)
+        self.widgets['btn_refresh_term'] = ttk.Button(term_frame, text=L['refresh_terminals'], command=self.refresh_terminals)
+        self.widgets['btn_refresh_term'].pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(term_frame, text='Python环境:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
+        self.widgets['lbl_python'] = ttk.Label(term_frame, text=L['python_env'], font=('微软雅黑', 10))
+        self.widgets['lbl_python'].pack(side=tk.LEFT, padx=5)
         self.python_env_var = tk.StringVar(value=self.settings.get('default_python_env', ''))
         self.python_env_combo = ttk.Combobox(term_frame, textvariable=self.python_env_var, values=list(self.settings.get('python_envs', {}).keys()), width=20, state='readonly')
         self.python_env_combo.pack(side=tk.LEFT, padx=5)
@@ -352,21 +507,44 @@ class App:
 
         self.python_env_var.trace('w', on_env_change)
 
-        ttk.Button(term_frame, text='刷新环境列表', command=self.refresh_python_envs).pack(side=tk.LEFT, padx=2)
+        self.widgets['btn_refresh_env'] = ttk.Button(term_frame, text=L['refresh_envs'], command=self.refresh_python_envs)
+        self.widgets['btn_refresh_env'].pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(term_frame, text='当前KEY:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
-        self.current_key_label = ttk.Label(term_frame, text='未选择', font=('微软雅黑', 10), foreground='blue')
+        self.widgets['lbl_current'] = ttk.Label(term_frame, text=L['current_key'], font=('微软雅黑', 10))
+        self.widgets['lbl_current'].pack(side=tk.LEFT, padx=5)
+        self.current_key_label = ttk.Label(term_frame, text=L['not_selected'], font=('微软雅黑', 10), foreground='blue')
         self.current_key_label.pack(side=tk.LEFT, padx=5)
 
         # 地址选择
         addr_frame = ttk.Frame(bottom_frame)
         addr_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(addr_frame, text='工作目录:', font=('微软雅黑', 10)).pack(side=tk.LEFT, padx=5)
+        self.widgets['lbl_workdir'] = ttk.Label(addr_frame, text=L['work_dir'], font=('微软雅黑', 10))
+        self.widgets['lbl_workdir'].pack(side=tk.LEFT, padx=5)
         self.work_dir_var = tk.StringVar(value=self.selected_folder or '')
         ttk.Entry(addr_frame, textvariable=self.work_dir_var, width=40).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        ttk.Button(addr_frame, text='浏览', command=self.select_work_dir).pack(side=tk.LEFT, padx=2)
-        ttk.Button(addr_frame, text='打开终端', command=self.open_terminal).pack(side=tk.LEFT, padx=2)
+        self.widgets['btn_browse'] = ttk.Button(addr_frame, text=L['browse'], command=self.select_work_dir)
+        self.widgets['btn_browse'].pack(side=tk.LEFT, padx=2)
+        self.widgets['btn_open_term'] = ttk.Button(addr_frame, text=L['open_terminal'], command=self.open_terminal)
+        self.widgets['btn_open_term'].pack(side=tk.LEFT, padx=2)
+
+    def switch_language(self):
+        self.lang = 'en' if self.lang == 'zh' else 'zh'
+        self.L = LANG[self.lang]
+        self.root.title(self.L['title'].format(VERSION))
+        # 保存当前选择
+        saved_terminal = self.terminal_var.get() if hasattr(self, 'terminal_var') else None
+        saved_env = self.python_env_var.get() if hasattr(self, 'python_env_var') else None
+        saved_workdir = self.work_dir_var.get() if hasattr(self, 'work_dir_var') else None
+        # 重建 UI
+        self.build_ui()
+        # 恢复选择
+        if saved_terminal:
+            self.terminal_var.set(saved_terminal)
+        if saved_env:
+            self.python_env_var.set(saved_env)
+        if saved_workdir:
+            self.work_dir_var.set(saved_workdir)
 
     def refresh_list(self):
         self.configs = load_configs()
@@ -374,7 +552,7 @@ class App:
 
         endpoints = {}
         for c in self.configs:
-            endpoint = c['provider'].get('endpoint', '未分类')
+            endpoint = c['provider'].get('endpoint', self.L['uncategorized'])
             if endpoint not in endpoints:
                 endpoints[endpoint] = []
             endpoints[endpoint].append(c)
@@ -422,16 +600,16 @@ class App:
 
     def new_config(self):
         if self.edit_dialog_open:
-            messagebox.showwarning('提示', '编辑对话框已打开，请先关闭')
+            messagebox.showwarning(self.L['tip'], self.L['dialog_open'])
             return
         self.show_config_dialog(None)
 
     def edit_config(self):
         if self.edit_dialog_open:
-            messagebox.showwarning('提示', '编辑对话框已打开，请先关闭')
+            messagebox.showwarning(self.L['tip'], self.L['dialog_open'])
             return
         if not self.selected_config_id:
-            messagebox.showerror('错误', '请选择配置')
+            messagebox.showerror(self.L['error'], self.L['select_config'])
             return
         config = self.get_config_by_id(self.selected_config_id)
         if config:
@@ -440,8 +618,9 @@ class App:
 
     def show_config_dialog(self, index):
         self.edit_dialog_open = True
+        L = self.L
         dialog = tk.Toplevel(self.root)
-        dialog.title('配置编辑' if index is not None else '新增配置')
+        dialog.title(L['config_edit'] if index is not None else L['new_config'])
         dialog.geometry('480x380')
 
         def on_dialog_close():
@@ -487,30 +666,30 @@ class App:
         frame = ttk.Frame(dialog, padding=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text='标签:', font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['label'], font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=4, padx=5)
         label_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         label_entry.grid(row=0, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text='提供商:', font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['provider'], font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
         provider_var = tk.StringVar(value='anthropic')
         provider_combo = ttk.Combobox(frame, textvariable=provider_var, font=('微软雅黑', 10),
                                       values=['openai', 'azure', 'anthropic', 'gemini', 'deepseek', 'custom'], width=27)
         provider_combo.grid(row=1, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text='模型:', font=('微软雅黑', 10)).grid(row=2, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['model'], font=('微软雅黑', 10)).grid(row=2, column=0, sticky=tk.W, pady=4, padx=5)
         model_var = tk.StringVar()
         model_combo = ttk.Combobox(frame, textvariable=model_var, font=('微软雅黑', 10), width=27)
         model_combo.grid(row=2, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text='API地址:', font=('微软雅黑', 10)).grid(row=3, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['api_addr'], font=('微软雅黑', 10)).grid(row=3, column=0, sticky=tk.W, pady=4, padx=5)
         endpoint_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         endpoint_entry.grid(row=3, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text='KEY名称:', font=('微软雅黑', 10)).grid(row=4, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['key_name'], font=('微软雅黑', 10)).grid(row=4, column=0, sticky=tk.W, pady=4, padx=5)
         key_name_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         key_name_entry.grid(row=4, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text='API密钥:', font=('微软雅黑', 10)).grid(row=5, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['api_key'], font=('微软雅黑', 10)).grid(row=5, column=0, sticky=tk.W, pady=4, padx=5)
         api_key_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         api_key_entry.grid(row=5, column=1, pady=4, padx=5)
 
@@ -582,7 +761,7 @@ class App:
             api_key = api_key_entry.get()
 
             if not label or not api_key:
-                messagebox.showerror('错误', '请填写标签和API密钥')
+                messagebox.showerror(L['error'], L['fill_label_key'])
                 return
 
             # 获取模型名称
@@ -630,13 +809,13 @@ class App:
 
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=6, column=0, columnspan=2, pady=12, padx=5)
-        ttk.Button(btn_frame, text='保存', command=save).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text='取消', command=on_dialog_close).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=L['save'], command=save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=L['cancel'], command=on_dialog_close).pack(side=tk.LEFT, padx=5)
 
     def delete_config(self):
         sel = self.tree.selection()
         if not sel:
-            messagebox.showerror('错误', '请选择配置')
+            messagebox.showerror(self.L['error'], self.L['select_config'])
             return
 
         item = sel[0]
@@ -648,14 +827,14 @@ class App:
                 self.configs.remove(config)
         else:
             endpoint = self.tree.item(item, 'text')
-            self.configs = [c for c in self.configs if c['provider'].get('endpoint', '未分类') != endpoint]
+            self.configs = [c for c in self.configs if c['provider'].get('endpoint', self.L['uncategorized']) != endpoint]
 
         save_configs(self.configs)
         self.refresh_list()
 
     def copy_key(self):
         if not self.selected_config_id:
-            messagebox.showerror('错误', '请选择配置')
+            messagebox.showerror(self.L['error'], self.L['select_config'])
             return
 
         config = self.get_config_by_id(self.selected_config_id)
@@ -672,7 +851,7 @@ class App:
 
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
-        messagebox.showinfo('成功', '密钥已复制到剪贴板')
+        messagebox.showinfo(self.L['success'], self.L['key_copied'])
 
     def move_up(self):
         sel = self.tree.selection()
@@ -798,7 +977,7 @@ class App:
 
     def open_terminal(self):
         if not self.selected_config_id:
-            messagebox.showerror('错误', '请选择配置')
+            messagebox.showerror(self.L['error'], self.L['select_config'])
             return
 
         self.configs = load_configs()
@@ -811,7 +990,7 @@ class App:
         endpoint = config['provider'].get('endpoint', '')
         terminal_name = self.terminal_var.get()
         if terminal_name not in self.available_terminals:
-            messagebox.showerror('错误', '选择的终端不可用')
+            messagebox.showerror(self.L['error'], self.L['terminal_unavailable'])
             return
         terminal_cmd = self.available_terminals[terminal_name]
         python_env_name = self.python_env_var.get()
@@ -921,10 +1100,10 @@ class App:
             else:
                 subprocess.Popen(terminal_cmd, env=env, cwd=cwd, shell=True)
         except Exception as e:
-            messagebox.showerror('错误', f'无法打开终端: {str(e)}')
+            messagebox.showerror(self.L['error'], self.L['cannot_open_terminal'].format(str(e)))
 
     def select_work_dir(self):
-        folder = filedialog.askdirectory(title='选择工作目录')
+        folder = filedialog.askdirectory(title=self.L['select_work_dir'])
         if folder:
             self.work_dir_var.set(folder)
             folder_file = CONFIG_DIR / 'last_folder.txt'
@@ -938,7 +1117,7 @@ class App:
         self.terminal_combo['values'] = list(self.available_terminals.keys())
         if self.available_terminals:
             self.terminal_var.set(list(self.available_terminals.keys())[0])
-        messagebox.showinfo('成功', '终端列表已刷新')
+        messagebox.showinfo(self.L['success'], self.L['terminals_refreshed'])
 
     def refresh_python_envs(self):
         """刷新Python环境列表"""
@@ -971,23 +1150,24 @@ class App:
         self.python_env_combo['values'] = list(new_python_envs.keys())
 
         if new_python_envs:
-            messagebox.showinfo('成功', f'Python环境列表已刷新，发现 {len(new_python_envs)} 个环境')
+            messagebox.showinfo(self.L['success'], self.L['envs_refreshed'].format(len(new_python_envs)))
         else:
-            messagebox.showwarning('警告', '没有找到Python环境')
+            messagebox.showwarning(self.L['warning'], self.L['no_envs'])
 
     def add_terminal_dialog(self):
+        L = self.L
         dialog = tk.Toplevel(self.root)
-        dialog.title('添加自定义终端')
+        dialog.title(L['add_custom_terminal'])
         dialog.geometry('400x150')
 
         frame = ttk.Frame(dialog, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text='终端名称:', font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Label(frame, text=L['terminal_name'], font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=5)
         name_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         name_entry.grid(row=0, column=1, pady=5)
 
-        ttk.Label(frame, text='命令:', font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(frame, text=L['command'], font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=5)
         cmd_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
         cmd_entry.grid(row=1, column=1, pady=5)
 
@@ -995,19 +1175,19 @@ class App:
             name = name_entry.get()
             cmd = cmd_entry.get()
             if not name or not cmd:
-                messagebox.showerror('错误', '请填写终端名称和命令')
+                messagebox.showerror(L['error'], L['fill_name_cmd'])
                 return
             self.available_terminals[name] = cmd
             self.settings['terminals'] = self.available_terminals
             save_settings(self.settings)
             self.terminal_combo['values'] = list(self.available_terminals.keys())
-            messagebox.showinfo('成功', '终端已添加')
+            messagebox.showinfo(L['success'], L['terminal_added'])
             dialog.destroy()
 
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=2, column=0, columnspan=2, pady=20)
-        ttk.Button(btn_frame, text='保存', command=save).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text='取消', command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=L['save'], command=save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=L['cancel'], command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
     def load_last_folder(self):
         folder_file = CONFIG_DIR / 'last_folder.txt'
@@ -1033,9 +1213,9 @@ class App:
                 }
                 with open(file, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
-                messagebox.showinfo('成功', f'配置已导出到: {file}')
+                messagebox.showinfo(self.L['success'], self.L['exported_to'].format(file))
             except Exception as e:
-                messagebox.showerror('错误', f'导出失败: {str(e)}')
+                messagebox.showerror(self.L['error'], self.L['export_failed'].format(str(e)))
 
     def import_configs(self):
         file = filedialog.askopenfilename(filetypes=[('JSON files', '*.json')])
@@ -1045,14 +1225,14 @@ class App:
                     data = json.load(f)
                     imported = data.get('configurations', [])
                     if not imported:
-                        messagebox.showerror('错误', '文件中没有配置数据')
+                        messagebox.showerror(self.L['error'], self.L['no_config_data'])
                         return
                     self.configs.extend(imported)
                     save_configs(self.configs)
                     self.refresh_list()
-                    messagebox.showinfo('成功', f'已导入 {len(imported)} 个配置')
+                    messagebox.showinfo(self.L['success'], self.L['imported_count'].format(len(imported)))
             except Exception as e:
-                messagebox.showerror('错误', f'导入失败: {str(e)}')
+                messagebox.showerror(self.L['error'], self.L['import_failed'].format(str(e)))
 
 if __name__ == '__main__':
     instance_lock = threading.Lock()

@@ -1644,10 +1644,10 @@ def main(page: ft.Page):
 
     def select_endpoint(endpoint_key):
         nonlocal selected_cli, selected_endpoint, selected_config
-        selected_cli = endpoint_key.split(':')[0]
+        selected_cli = endpoint_key.split(':', 1)[0]
         selected_endpoint = endpoint_key
         selected_config = None
-        current_key_label.value = f"Endpoint: {endpoint_key.split(':')[1][:30]}"
+        current_key_label.value = f"Endpoint: {endpoint_key.split(':', 1)[1][:30]}"
         refresh_config_list()
 
     def select_config(idx):
@@ -1707,7 +1707,7 @@ def main(page: ft.Page):
         nonlocal selected_config, selected_endpoint, selected_cli
         if selected_config is not None:
             # 三级：配置项在同端点内移动
-            cli, ep = selected_endpoint.split(':') if selected_endpoint else (None, None)
+            cli, ep = selected_endpoint.split(':', 1) if selected_endpoint else (None, None)
             same_ep = [i for i, c in enumerate(configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
             pos = same_ep.index(selected_config) if selected_config in same_ep else -1
             if pos > 0:
@@ -1718,9 +1718,8 @@ def main(page: ft.Page):
                 refresh_config_list()
         elif selected_endpoint:
             # 二级：端点在同CLI内移动
-            cli = selected_endpoint.split(':')[0]
+            cli, ep = selected_endpoint.split(':', 1)
             eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
-            ep = selected_endpoint.split(':')[1]
             pos = eps.index(ep) if ep in eps else -1
             if pos > 0:
                 # 交换两个端点的所有配置项
@@ -1758,7 +1757,7 @@ def main(page: ft.Page):
         nonlocal selected_config, selected_endpoint, selected_cli
         if selected_config is not None:
             # 三级：配置项在同端点内移动
-            cli, ep = selected_endpoint.split(':') if selected_endpoint else (None, None)
+            cli, ep = selected_endpoint.split(':', 1) if selected_endpoint else (None, None)
             same_ep = [i for i, c in enumerate(configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
             pos = same_ep.index(selected_config) if selected_config in same_ep else -1
             if pos >= 0 and pos < len(same_ep) - 1:
@@ -1769,9 +1768,8 @@ def main(page: ft.Page):
                 refresh_config_list()
         elif selected_endpoint:
             # 二级：端点在同CLI内移动
-            cli = selected_endpoint.split(':')[0]
+            cli, ep = selected_endpoint.split(':', 1)
             eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
-            ep = selected_endpoint.split(':')[1]
             pos = eps.index(ep) if ep in eps else -1
             if pos >= 0 and pos < len(eps) - 1:
                 next_ep = eps[pos + 1]

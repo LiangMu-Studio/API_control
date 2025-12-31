@@ -1470,7 +1470,7 @@ def main(page: ft.Page):
     page.window.height = 700
     page.theme_mode = ft.ThemeMode.DARK if theme_mode == 'dark' else ft.ThemeMode.LIGHT
     page.theme = ft.Theme(
-        font_family="Microsoft YaHei UI, Segoe UI, sans-serif",
+        font_family="SimSun",
         tooltip_theme=ft.TooltipTheme(wait_duration=200),
     )
     page.bgcolor = THEMES[theme_mode]["bg"]
@@ -1478,11 +1478,11 @@ def main(page: ft.Page):
     def toggle_theme(e):
         nonlocal theme_mode
         theme_mode = "dark" if theme_mode == "light" else "light"
-        page.theme_mode = ft.ThemeMode.DARK if theme_mode == 'dark' else ft.ThemeMode.LIGHT
-        page.bgcolor = THEMES[theme_mode]["bg"]
         settings['theme'] = theme_mode
         save_settings(settings)
-        page.update()
+        # 清理并重新加载界面
+        page.clean()
+        main(page)
 
     # 设置窗口图标
     icon_path = Path(__file__).parent / "icon.ico"
@@ -1520,7 +1520,9 @@ def main(page: ft.Page):
 
     debug_print("初始化完成，开始构建UI...")
 
-    selected_config = None
+    selected_config = None  # 三级配置项选择
+    selected_endpoint = None  # 二级端点选择 (cli_type:endpoint)
+    selected_cli = None  # 一级CLI选择
     selected_prompt = None
     selected_mcp = None
 
@@ -1549,43 +1551,55 @@ def main(page: ft.Page):
         config_tree.controls.clear()
         tree = build_tree_structure()
         theme = THEMES[theme_mode]
+        cli_list = list(tree.keys())
 
-        for cli_type in tree:
+        for cli_idx, cli_type in enumerate(cli_list):
             cli_name = CLI_TOOLS.get(cli_type, {}).get('name', cli_type)
             cli_key = cli_type
             is_cli_expanded = expanded_cli.get(cli_key, True)
+            is_cli_selected = selected_cli == cli_key and selected_endpoint is None and selected_config is None
 
             # CLI 工具层（第一级）
-            cli_header = ft.Container(
-                content=ft.Row([
-                    ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_cli_expanded else ft.Icons.ARROW_RIGHT, size=20, color=theme['text']),
-                    ft.Icon(ft.Icons.TERMINAL, color=theme['icon_cli']),
-                    ft.Text(cli_name, weight=ft.FontWeight.BOLD, color=theme['text']),
-                    ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=theme['text_sec']),
-                ], spacing=5),
-                padding=ft.padding.only(left=5, top=8, bottom=8),
-                on_click=lambda e, k=cli_key: toggle_cli(k),
-                bgcolor=theme['header_bg'],
-                border_radius=4,
+            cli_header = ft.GestureDetector(
+                content=ft.Container(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_cli_expanded else ft.Icons.ARROW_RIGHT, size=20, color=theme['text']),
+                        ft.Icon(ft.Icons.TERMINAL, color=theme['icon_cli']),
+                        ft.Text(cli_name, weight=ft.FontWeight.BOLD, color=theme['text_selected'] if is_cli_selected else theme['text']),
+                        ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=theme['text_sec']),
+                    ], spacing=5),
+                    padding=ft.padding.only(left=5, top=8, bottom=8),
+                    bgcolor=theme['selection_bg'] if is_cli_selected else theme['header_bg'],
+                    border_radius=4,
+                ),
+                on_tap=lambda e, k=cli_key: select_cli(k),
+                on_double_tap=lambda e, k=cli_key: toggle_cli(k),
             )
             config_tree.controls.append(cli_header)
 
             if is_cli_expanded:
-                for endpoint in tree[cli_type]:
+                endpoint_list = list(tree[cli_type].keys())
+                for ep_idx, endpoint in enumerate(endpoint_list):
                     endpoint_key = f"{cli_type}:{endpoint}"
                     is_endpoint_expanded = expanded_endpoint.get(endpoint_key, True)
                     short_endpoint = endpoint[:40] + "..." if len(endpoint) > 40 else endpoint
+                    is_ep_selected = selected_endpoint == endpoint_key and selected_config is None
 
                     # API 端点层（第二级）
-                    endpoint_header = ft.Container(
-                        content=ft.Row([
-                            ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_endpoint_expanded else ft.Icons.ARROW_RIGHT, size=18, color=theme['text']),
-                            ft.Icon(ft.Icons.LINK, size=16, color=theme['icon_endpoint']),
-                            ft.Text(short_endpoint, size=13, color=theme['text']),
-                            ft.Text(f"({len(tree[cli_type][endpoint])})", color=theme['text_sec'], size=12),
-                        ], spacing=5),
-                        padding=ft.padding.only(left=30, top=6, bottom=6),
-                        on_click=lambda e, k=endpoint_key: toggle_endpoint(k),
+                    endpoint_header = ft.GestureDetector(
+                        content=ft.Container(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_endpoint_expanded else ft.Icons.ARROW_RIGHT, size=18, color=theme['text']),
+                                ft.Icon(ft.Icons.LINK, size=16, color=theme['icon_endpoint']),
+                                ft.Text(short_endpoint, size=13, color=theme['text_selected'] if is_ep_selected else theme['text']),
+                                ft.Text(f"({len(tree[cli_type][endpoint])})", color=theme['text_sec'], size=12),
+                            ], spacing=5),
+                            padding=ft.padding.only(left=30, top=6, bottom=6),
+                            bgcolor=theme['selection_bg'] if is_ep_selected else None,
+                            border_radius=4,
+                        ),
+                        on_tap=lambda e, k=endpoint_key: select_endpoint(k),
+                        on_double_tap=lambda e, k=endpoint_key: toggle_endpoint(k),
                     )
                     config_tree.controls.append(endpoint_header)
 
@@ -1618,6 +1632,22 @@ def main(page: ft.Page):
 
     def toggle_endpoint(endpoint_key):
         expanded_endpoint[endpoint_key] = not expanded_endpoint.get(endpoint_key, True)
+        refresh_config_list()
+
+    def select_cli(cli_key):
+        nonlocal selected_cli, selected_endpoint, selected_config
+        selected_cli = cli_key
+        selected_endpoint = None
+        selected_config = None
+        current_key_label.value = f"CLI: {CLI_TOOLS.get(cli_key, {}).get('name', cli_key)}"
+        refresh_config_list()
+
+    def select_endpoint(endpoint_key):
+        nonlocal selected_cli, selected_endpoint, selected_config
+        selected_cli = endpoint_key.split(':')[0]
+        selected_endpoint = endpoint_key
+        selected_config = None
+        current_key_label.value = f"Endpoint: {endpoint_key.split(':')[1][:30]}"
         refresh_config_list()
 
     def select_config(idx):
@@ -1674,20 +1704,106 @@ def main(page: ft.Page):
             page.update()
 
     def move_up(e):
-        nonlocal selected_config
-        if selected_config is not None and selected_config > 0:
-            configs[selected_config], configs[selected_config - 1] = configs[selected_config - 1], configs[selected_config]
-            selected_config -= 1
-            save_configs(configs)
-            refresh_config_list()
+        nonlocal selected_config, selected_endpoint, selected_cli
+        if selected_config is not None:
+            # 三级：配置项在同端点内移动
+            cli, ep = selected_endpoint.split(':') if selected_endpoint else (None, None)
+            same_ep = [i for i, c in enumerate(configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+            pos = same_ep.index(selected_config) if selected_config in same_ep else -1
+            if pos > 0:
+                prev_idx = same_ep[pos - 1]
+                configs[selected_config], configs[prev_idx] = configs[prev_idx], configs[selected_config]
+                selected_config = prev_idx
+                save_configs(configs)
+                refresh_config_list()
+        elif selected_endpoint:
+            # 二级：端点在同CLI内移动
+            cli = selected_endpoint.split(':')[0]
+            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
+            ep = selected_endpoint.split(':')[1]
+            pos = eps.index(ep) if ep in eps else -1
+            if pos > 0:
+                # 交换两个端点的所有配置项
+                prev_ep = eps[pos - 1]
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == ep:
+                            c['provider']['endpoint'] = '__temp__'
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == prev_ep:
+                            c['provider']['endpoint'] = ep
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == '__temp__':
+                            c['provider']['endpoint'] = prev_ep
+                selected_endpoint = f"{cli}:{prev_ep}"
+                save_configs(configs)
+                refresh_config_list()
+        elif selected_cli:
+            # 一级：CLI组移动
+            clis = list(dict.fromkeys(c.get('cli_type') for c in configs))
+            pos = clis.index(selected_cli) if selected_cli in clis else -1
+            if pos > 0:
+                prev_cli = clis[pos - 1]
+                # 重排configs：把selected_cli的项移到prev_cli之前
+                cli_items = [c for c in configs if c.get('cli_type') == selected_cli]
+                other_items = [c for c in configs if c.get('cli_type') != selected_cli]
+                insert_pos = next((i for i, c in enumerate(other_items) if c.get('cli_type') == prev_cli), 0)
+                configs[:] = other_items[:insert_pos] + cli_items + other_items[insert_pos:]
+                save_configs(configs)
+                refresh_config_list()
 
     def move_down(e):
-        nonlocal selected_config
-        if selected_config is not None and selected_config < len(configs) - 1:
-            configs[selected_config], configs[selected_config + 1] = configs[selected_config + 1], configs[selected_config]
-            selected_config += 1
-            save_configs(configs)
-            refresh_config_list()
+        nonlocal selected_config, selected_endpoint, selected_cli
+        if selected_config is not None:
+            # 三级：配置项在同端点内移动
+            cli, ep = selected_endpoint.split(':') if selected_endpoint else (None, None)
+            same_ep = [i for i, c in enumerate(configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+            pos = same_ep.index(selected_config) if selected_config in same_ep else -1
+            if pos >= 0 and pos < len(same_ep) - 1:
+                next_idx = same_ep[pos + 1]
+                configs[selected_config], configs[next_idx] = configs[next_idx], configs[selected_config]
+                selected_config = next_idx
+                save_configs(configs)
+                refresh_config_list()
+        elif selected_endpoint:
+            # 二级：端点在同CLI内移动
+            cli = selected_endpoint.split(':')[0]
+            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in configs if c.get('cli_type') == cli))
+            ep = selected_endpoint.split(':')[1]
+            pos = eps.index(ep) if ep in eps else -1
+            if pos >= 0 and pos < len(eps) - 1:
+                next_ep = eps[pos + 1]
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == ep:
+                            c['provider']['endpoint'] = '__temp__'
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == next_ep:
+                            c['provider']['endpoint'] = ep
+                for c in configs:
+                    if c.get('cli_type') == cli:
+                        if c.get('provider', {}).get('endpoint') == '__temp__':
+                            c['provider']['endpoint'] = next_ep
+                selected_endpoint = f"{cli}:{next_ep}"
+                save_configs(configs)
+                refresh_config_list()
+        elif selected_cli:
+            # 一级：CLI组移动
+            clis = list(dict.fromkeys(c.get('cli_type') for c in configs))
+            pos = clis.index(selected_cli) if selected_cli in clis else -1
+            if pos >= 0 and pos < len(clis) - 1:
+                next_cli = clis[pos + 1]
+                # 重排configs：把selected_cli的项移到next_cli之后
+                cli_items = [c for c in configs if c.get('cli_type') == selected_cli]
+                other_items = [c for c in configs if c.get('cli_type') != selected_cli]
+                # 找到next_cli最后一项的位置
+                insert_pos = len([c for c in other_items if clis.index(c.get('cli_type')) <= clis.index(next_cli)])
+                configs[:] = other_items[:insert_pos] + cli_items + other_items[insert_pos:]
+                save_configs(configs)
+                refresh_config_list()
 
     def export_configs(e):
         def on_result(result: ft.FilePickerResultEvent):

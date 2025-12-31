@@ -2744,6 +2744,7 @@ def main(page: ft.Page):
     # ========== 历史记录管理页面（Tab 结构：Claude / Codex / Kiro）==========
     # 当前选中的 CLI 类型
     current_cli = "claude"
+    current_page_idx = 0  # 跟踪当前页面索引
     selected_sessions = {}  # {session_id: data}
     all_session_items = []  # [(item, item_data), ...]
     last_clicked_idx = -1
@@ -2778,18 +2779,21 @@ def main(page: ft.Page):
         last_clicked_idx = -1
         history_tree.controls.clear()
         history_progress.visible = True
+        if current_page_idx != 3: return
         page.update()
         mgr = get_current_manager()
         if current_cli in ("gemini", "aider"):
             history_tree.controls.append(ft.Text(f"{current_cli.title()} 历史记录暂不支持（格式不兼容）", color=ft.Colors.ORANGE))
             history_stats.value = ""
             history_progress.visible = False
+            if current_page_idx != 3: return
             page.update()
             return
         if not mgr:
             history_tree.controls.append(ft.Text(f"{current_cli.title()} 目录不存在", color=ft.Colors.RED))
             history_stats.value = ""
             history_progress.visible = False
+            if current_page_idx != 3: return
             page.update()
             return
         # 加载数据（使用缓存）
@@ -2797,6 +2801,7 @@ def main(page: ft.Page):
         if not history_data:
             history_stats.value = "无历史记录"
             history_progress.visible = False
+            if current_page_idx != 3: return
             page.update()
             return
         # 统计
@@ -2968,6 +2973,7 @@ def main(page: ft.Page):
                 controls=[ft.Column(old_items, horizontal_alignment=ft.CrossAxisAlignment.START)], initially_expanded=False,
             ))
         history_progress.visible = False
+        if current_page_idx != 3: return
         page.update()
 
     def show_session_detail(data):
@@ -3417,7 +3423,9 @@ def main(page: ft.Page):
     content_area = ft.Container(api_page, expand=True, padding=20)
 
     def switch_page(e):
+        nonlocal current_page_idx
         idx = e.control.selected_index
+        current_page_idx = idx
         if idx == 0:
             content_area.content = api_page
             refresh_config_list()
@@ -3426,12 +3434,19 @@ def main(page: ft.Page):
             refresh_prompt_list()
         elif idx == 2:
             content_area.content = mcp_page
-            refresh_mcp_tree()
+            if not mcp_tree.controls:
+                page.update()
+                async def load_mcp():
+                    if current_page_idx != 2: return
+                    refresh_mcp_tree()
+                page.run_task(load_mcp)
+                return
         elif idx == 3:
             content_area.content = history_page
             if not history_cache.get(current_cli) or not history_tree.controls:
                 page.update()
                 async def load_history():
+                    if current_page_idx != 3: return
                     refresh_history_tree()
                 page.run_task(load_history)
                 return
@@ -3471,13 +3486,15 @@ def main(page: ft.Page):
     # 初始化列表
     refresh_config_list()
 
-    # 后台预加载历史记录
+    # 后台预加载历史记录（使用线程池避免阻塞UI）
+    import asyncio
     async def preload_history():
         global history_cache
+        loop = asyncio.get_event_loop()
         if history_manager:
-            history_cache["claude"] = history_manager.load_sessions()
+            history_cache["claude"] = await loop.run_in_executor(None, history_manager.load_sessions)
         if codex_history_manager:
-            history_cache["codex"] = codex_history_manager.load_sessions()
+            history_cache["codex"] = await loop.run_in_executor(None, codex_history_manager.load_sessions)
     page.run_task(preload_history)
 
     # 首次启动：后台自动刷新终端和环境

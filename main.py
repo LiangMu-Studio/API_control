@@ -20,10 +20,42 @@ import socket
 import webbrowser
 from git_bash_detector import find_git_bash, is_git_bash_available
 
+# CLI 工具定义
+CLI_TOOLS = {
+    'claude': {
+        'name': 'Claude Code',
+        'command': 'claude',
+        'default_key_name': 'ANTHROPIC_API_KEY',
+        'default_endpoint': 'https://api.anthropic.com',
+        'base_url_env': 'ANTHROPIC_BASE_URL'
+    },
+    'codex': {
+        'name': 'Codex CLI',
+        'command': 'codex',
+        'default_key_name': 'OPENAI_API_KEY',
+        'default_endpoint': 'https://api.openai.com/v1',
+        'base_url_env': 'OPENAI_BASE_URL'
+    },
+    'gemini': {
+        'name': 'Gemini CLI',
+        'command': 'gemini',
+        'default_key_name': 'GEMINI_API_KEY',
+        'default_endpoint': 'https://generativelanguage.googleapis.com/v1beta',
+        'base_url_env': 'GEMINI_BASE_URL'
+    },
+    'aider': {
+        'name': 'Aider',
+        'command': 'aider',
+        'default_key_name': 'OPENAI_API_KEY',
+        'default_endpoint': 'https://api.openai.com/v1',
+        'base_url_env': 'OPENAI_BASE_URL'
+    }
+}
+
 # 多语言支持
 LANG = {
     'zh': {
-        'title': 'LiangMu-Studio API Key v{} - PowerShell 集成终端',
+        'title': 'LiangMu-Studio API Key v{} - 多CLI集成终端',
         'api_config': 'API 密钥配置',
         'add': '新增',
         'edit': '编辑',
@@ -47,7 +79,8 @@ LANG = {
         'refresh_envs': '刷新环境列表',
         'config_edit': '配置编辑',
         'new_config': '新增配置',
-        'label': '标签:',
+        'label': '名称:',
+        'cli_type': 'CLI工具:',
         'provider': '提供商:',
         'model': '模型:',
         'api_addr': 'API地址:',
@@ -60,7 +93,7 @@ LANG = {
         'warning': '警告',
         'tip': '提示',
         'select_config': '请选择配置',
-        'fill_label_key': '请填写标签和API密钥',
+        'fill_label_key': '请填写名称和API密钥',
         'key_copied': '密钥已复制到剪贴板',
         'terminal_unavailable': '选择的终端不可用',
         'cannot_open_terminal': '无法打开终端: {}',
@@ -83,7 +116,7 @@ LANG = {
         'lang_switch': '🌐 EN',
     },
     'en': {
-        'title': 'LiangMu-Studio API Key v{} - PowerShell Terminal',
+        'title': 'LiangMu-Studio API Key v{} - Multi-CLI Terminal',
         'api_config': 'API Key Configuration',
         'add': 'Add',
         'edit': 'Edit',
@@ -107,7 +140,8 @@ LANG = {
         'refresh_envs': 'Refresh Envs',
         'config_edit': 'Edit Config',
         'new_config': 'New Config',
-        'label': 'Label:',
+        'label': 'Name:',
+        'cli_type': 'CLI Tool:',
         'provider': 'Provider:',
         'model': 'Model:',
         'api_addr': 'API URL:',
@@ -120,7 +154,7 @@ LANG = {
         'warning': 'Warning',
         'tip': 'Tip',
         'select_config': 'Please select a config',
-        'fill_label_key': 'Please fill in label and API key',
+        'fill_label_key': 'Please fill in name and API key',
         'key_copied': 'Key copied to clipboard',
         'terminal_unavailable': 'Selected terminal unavailable',
         'cannot_open_terminal': 'Cannot open terminal: {}',
@@ -550,28 +584,41 @@ class App:
         self.configs = load_configs()
         self.tree.delete(*self.tree.get_children())
 
-        endpoints = {}
+        # 三级结构：CLI类型 -> 端点 -> 配置项
+        cli_groups = {}
         for c in self.configs:
+            cli_type = c.get('cli_type', 'claude')
             endpoint = c['provider'].get('endpoint', self.L['uncategorized'])
-            if endpoint not in endpoints:
-                endpoints[endpoint] = []
-            endpoints[endpoint].append(c)
+            if cli_type not in cli_groups:
+                cli_groups[cli_type] = {}
+            if endpoint not in cli_groups[cli_type]:
+                cli_groups[cli_type][endpoint] = []
+            cli_groups[cli_type][endpoint].append(c)
 
-        sorted_endpoints = sorted(endpoints.items(), key=lambda x: min(c.get('order', 999) for c in x[1]))
-        for endpoint, configs in sorted_endpoints:
-            parent = self.tree.insert('', 'end', text=endpoint, open=True)
-            sorted_configs = sorted(configs, key=lambda c: c.get('order', 999))
-            for c in sorted_configs:
-                created = c.get('createdAt', '')[:10]
-                text = f"{c['label']} ({created})"
-                self.tree.insert(parent, 'end', text=text, tags=(c['id'],))
+        cli_order = list(CLI_TOOLS.keys())
+        sorted_cli_types = sorted(cli_groups.keys(), key=lambda x: cli_order.index(x) if x in cli_order else 999)
+
+        for cli_type in sorted_cli_types:
+            cli_info = CLI_TOOLS.get(cli_type, {})
+            cli_name = cli_info.get('name') or cli_type
+            cli_node = self.tree.insert('', 'end', text=cli_name, open=True)
+
+            for endpoint, configs in cli_groups[cli_type].items():
+                endpoint_node = self.tree.insert(cli_node, 'end', text=endpoint, open=True)
+                sorted_configs = sorted(configs, key=lambda c: c.get('order', 999))
+                for c in sorted_configs:
+                    created = c.get('createdAt', '')[:10]
+                    text = f"{c['label']} ({created})"
+                    self.tree.insert(endpoint_node, 'end', text=text, tags=(c['id'],))
 
     def on_config_select(self, event):
         sel = self.tree.selection()
         if sel:
             item = sel[0]
             parent = self.tree.parent(item)
-            if parent:
+            grandparent = self.tree.parent(parent) if parent else ''
+            # 只有第三层（有祖父节点）才是配置项
+            if grandparent:
                 config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
                 if config:
                     self.selected_config_id = config['id']
@@ -588,8 +635,10 @@ class App:
 
         item = sel[0]
         parent = self.tree.parent(item)
+        grandparent = self.tree.parent(parent) if parent else ''
 
-        if parent:
+        # 只有第三层才能编辑
+        if grandparent:
             self.edit_config()
 
     def get_config_by_id(self, config_id):
@@ -621,7 +670,12 @@ class App:
         L = self.L
         dialog = tk.Toplevel(self.root)
         dialog.title(L['config_edit'] if index is not None else L['new_config'])
-        dialog.geometry('480x380')
+        dialog.geometry('480x420')
+
+        print(f"\n=== 打开配置对话框 ===")
+        print(f"index = {index}")
+        if index is not None:
+            print(f"编辑配置: {self.configs[index]}")
 
         def on_dialog_close():
             self.edit_dialog_open = False
@@ -629,158 +683,101 @@ class App:
 
         dialog.protocol('WM_DELETE_WINDOW', on_dialog_close)
 
-        # 提供商默认设置
-        provider_defaults = {
-            'openai': {
-                'endpoint': 'https://api.openai.com/v1',
-                'key_name': 'OPENAI_API_KEY',
-                'default_model': 'gpt-4o'
-            },
-            'anthropic': {
-                'endpoint': 'https://api.anthropic.com',
-                'key_name': 'ANTHROPIC_AUTH_TOKEN',
-                'default_model': 'claude-opus-4-5-20251101'
-            },
-            'gemini': {
-                'endpoint': 'https://generativelanguage.googleapis.com/v1beta',
-                'key_name': 'x-goog-api-key',
-                'default_model': 'gemini-2.5-flash'
-            },
-            'deepseek': {
-                'endpoint': 'https://api.deepseek.com/v1',
-                'key_name': 'DEEPSEEK_API_KEY',
-                'default_model': 'DeepSeek-V3.2'
-            },
-            'azure': {
-                'endpoint': 'https://{resource-name}.openai.azure.com/openai',
-                'key_name': 'AZURE_API_KEY',
-                'default_model': 'gpt-4o'
-            },
-            'custom': {
-                'endpoint': '',
-                'key_name': 'API_KEY',
-                'default_model': None
-            }
-        }
-
         frame = ttk.Frame(dialog, padding=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text=L['label'], font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=4, padx=5)
+        # CLI 工具选择
+        ttk.Label(frame, text=L['cli_type'], font=('微软雅黑', 10)).grid(row=0, column=0, sticky=tk.W, pady=4, padx=5)
+        cli_options = [(k, v['name']) for k, v in CLI_TOOLS.items()]
+        cli_values = [name for _, name in cli_options]
+        cli_combo = ttk.Combobox(frame, font=('微软雅黑', 10),
+                                  values=cli_values, width=27, state='readonly')
+        cli_combo.grid(row=0, column=1, pady=4, padx=5)
+        cli_combo.current(0)  # 默认选中第一个
+
+        ttk.Label(frame, text=L['label'], font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
         label_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
-        label_entry.grid(row=0, column=1, pady=4, padx=5)
+        label_entry.grid(row=1, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text=L['provider'], font=('微软雅黑', 10)).grid(row=1, column=0, sticky=tk.W, pady=4, padx=5)
-        provider_var = tk.StringVar(value='anthropic')
-        provider_combo = ttk.Combobox(frame, textvariable=provider_var, font=('微软雅黑', 10),
-                                      values=['openai', 'azure', 'anthropic', 'gemini', 'deepseek', 'custom'], width=27)
-        provider_combo.grid(row=1, column=1, pady=4, padx=5)
-
-        ttk.Label(frame, text=L['model'], font=('微软雅黑', 10)).grid(row=2, column=0, sticky=tk.W, pady=4, padx=5)
-        model_var = tk.StringVar()
-        model_combo = ttk.Combobox(frame, textvariable=model_var, font=('微软雅黑', 10), width=27)
-        model_combo.grid(row=2, column=1, pady=4, padx=5)
-
-        ttk.Label(frame, text=L['api_addr'], font=('微软雅黑', 10)).grid(row=3, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['api_addr'], font=('微软雅黑', 10)).grid(row=2, column=0, sticky=tk.W, pady=4, padx=5)
         endpoint_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
-        endpoint_entry.grid(row=3, column=1, pady=4, padx=5)
+        endpoint_entry.grid(row=2, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text=L['key_name'], font=('微软雅黑', 10)).grid(row=4, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['key_name'], font=('微软雅黑', 10)).grid(row=3, column=0, sticky=tk.W, pady=4, padx=5)
         key_name_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
-        key_name_entry.grid(row=4, column=1, pady=4, padx=5)
+        key_name_entry.grid(row=3, column=1, pady=4, padx=5)
 
-        ttk.Label(frame, text=L['api_key'], font=('微软雅黑', 10)).grid(row=5, column=0, sticky=tk.W, pady=4, padx=5)
+        ttk.Label(frame, text=L['api_key'], font=('微软雅黑', 10)).grid(row=4, column=0, sticky=tk.W, pady=4, padx=5)
         api_key_entry = ttk.Entry(frame, width=30, font=('微软雅黑', 10))
-        api_key_entry.grid(row=5, column=1, pady=4, padx=5)
-
-        # 品牌变化时更新模型列表和默认设置
-        def update_provider_settings(*args):
-            selected_provider = provider_var.get()
-            defaults = provider_defaults.get(selected_provider, {})
-
-            # 更新 API 地址
-            endpoint_entry.delete(0, tk.END)
-            endpoint_entry.insert(0, defaults.get('endpoint', ''))
-
-            # 更新 KEY 名称
-            key_name_entry.delete(0, tk.END)
-            key_name_entry.insert(0, defaults.get('key_name', 'API_KEY'))
-
-            # 更新模型列表
-            if selected_provider in self.models:
-                models = self.models[selected_provider].get('models', [])
-                model_options = [m['label'] for m in models]
-                model_combo['values'] = model_options
-                if model_options:
-                    model_combo.current(0)
-            else:
-                model_combo['values'] = []
-                model_combo.set('')
-
-        provider_var.trace('w', update_provider_settings)
+        api_key_entry.grid(row=4, column=1, pady=4, padx=5)
 
         # 编辑现有配置时，恢复所有值
         if index is not None:
             config = self.configs[index]
+            cli_type = config.get('cli_type', 'claude')
+            cli_name = CLI_TOOLS.get(cli_type, {}).get('name', 'Claude Code')
+            if cli_name in cli_values:
+                cli_combo.current(cli_values.index(cli_name))
             label_entry.insert(0, config['label'])
-            provider_var.set(config['provider']['type'])
-
-            # 这会触发 update_provider_settings
-            update_provider_settings()
-
-            # 恢复已保存的 API 地址和 KEY 名称（如果不同于默认值）
-            endpoint_entry.delete(0, tk.END)
             endpoint_entry.insert(0, config['provider'].get('endpoint', ''))
-            key_name_entry.delete(0, tk.END)
             key_name_entry.insert(0, config['provider'].get('key_name', 'API_KEY'))
-
-            # 恢复模型选择
-            if 'model' in config['provider']:
-                model_name = config['provider']['model']
-                provider = config['provider']['type']
-                if provider in self.models:
-                    models = self.models[provider].get('models', [])
-                    for m in models:
-                        if m.get('name') == model_name or m.get('label') == model_name:
-                            model_var.set(m.get('label', m.get('name')))
-                            break
-
             api_key = config.get('provider', {}).get('credentials', {}).get('api_key', '')
             if api_key:
                 api_key_entry.insert(0, api_key)
-        else:
-            # 新配置时，初始化提供商默认设置
-            update_provider_settings()
+
+        # CLI 类型变化时更新默认设置（仅对新配置生效）
+        def update_cli_settings(event=None):
+            if index is not None:
+                return  # 编辑模式不自动更新
+            selected_name = cli_combo.get()
+            cli_key = None
+            for k, v in CLI_TOOLS.items():
+                if v['name'] == selected_name:
+                    cli_key = k
+                    break
+            if not cli_key:
+                return
+            cli_info = CLI_TOOLS[cli_key]
+            endpoint_entry.delete(0, tk.END)
+            endpoint_entry.insert(0, cli_info.get('default_endpoint', ''))
+            key_name_entry.delete(0, tk.END)
+            key_name_entry.insert(0, cli_info.get('default_key_name', 'API_KEY'))
+
+        cli_combo.bind('<<ComboboxSelected>>', update_cli_settings)
+
+        # 新配置时，初始化默认设置
+        if index is None:
+            update_cli_settings()
 
         def save():
             label = label_entry.get()
-            provider = provider_var.get()
-            model_label = model_var.get()
             endpoint = endpoint_entry.get()
             key_name = key_name_entry.get()
             api_key = api_key_entry.get()
+
+            # 获取 CLI 类型 key
+            selected_name = cli_combo.get()
+            print(f"\n=== 保存配置 ===")
+            print(f"cli_combo.get(): '{selected_name}'")
+            cli_key = 'claude'
+            for k, v in CLI_TOOLS.items():
+                if v['name'] == selected_name:
+                    cli_key = k
+                    break
+            print(f"解析得到 cli_key: '{cli_key}'")
 
             if not label or not api_key:
                 messagebox.showerror(L['error'], L['fill_label_key'])
                 return
 
-            # 获取模型名称
-            model_id = None
-            if provider in self.models and model_label:
-                models = self.models[provider].get('models', [])
-                for m in models:
-                    if m.get('label') == model_label:
-                        model_id = m.get('name', m.get('label'))
-                        break
-
-
             if index is None:
                 config = {
                     'id': f"{label}-{int(__import__('time').time())}",
                     'label': label,
+                    'cli_type': cli_key,
                     'provider': {
                         'name': label,
-                        'type': provider,
+                        'type': cli_key,
                         'endpoint': endpoint,
                         'key_name': key_name,
                         'credentials': {'api_key': api_key}
@@ -788,19 +785,16 @@ class App:
                     'createdAt': datetime.now().isoformat(),
                     'updatedAt': datetime.now().isoformat()
                 }
-                if model_id:
-                    config['provider']['model'] = model_id
                 self.configs.append(config)
+                print(f"新建配置: {config}")
             else:
                 self.configs[index]['label'] = label
-                self.configs[index]['provider']['type'] = provider
+                self.configs[index]['cli_type'] = cli_key
+                self.configs[index]['provider']['type'] = cli_key
+                print(f"更新配置[{index}] cli_type = '{cli_key}'")
                 self.configs[index]['provider']['endpoint'] = endpoint
                 self.configs[index]['provider']['key_name'] = key_name
                 self.configs[index]['provider']['credentials']['api_key'] = api_key
-                if model_id:
-                    self.configs[index]['provider']['model'] = model_id
-                elif 'model' in self.configs[index]['provider']:
-                    del self.configs[index]['provider']['model']
                 self.configs[index]['updatedAt'] = datetime.now().isoformat()
 
             save_configs(self.configs)
@@ -808,7 +802,7 @@ class App:
             on_dialog_close()
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=12, padx=5)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=12, padx=5)
         ttk.Button(btn_frame, text=L['save'], command=save).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text=L['cancel'], command=on_dialog_close).pack(side=tk.LEFT, padx=5)
 
@@ -820,14 +814,34 @@ class App:
 
         item = sel[0]
         parent = self.tree.parent(item)
+        grandparent = self.tree.parent(parent) if parent else ''
 
-        if parent:
+        if grandparent:
+            # 第三层：删除单个配置
             config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
             if config:
                 self.configs.remove(config)
-        else:
+        elif parent:
+            # 第二层：删除该端点下所有配置
             endpoint = self.tree.item(item, 'text')
-            self.configs = [c for c in self.configs if c['provider'].get('endpoint', self.L['uncategorized']) != endpoint]
+            cli_name = self.tree.item(parent, 'text')
+            cli_key = None
+            for k, v in CLI_TOOLS.items():
+                if v['name'] == cli_name:
+                    cli_key = k
+                    break
+            if cli_key:
+                self.configs = [c for c in self.configs if not (c.get('cli_type', 'claude') == cli_key and c['provider'].get('endpoint', '') == endpoint)]
+        else:
+            # 第一层：删除整个 CLI 类型分组
+            cli_name = self.tree.item(item, 'text')
+            cli_key = None
+            for k, v in CLI_TOOLS.items():
+                if v['name'] == cli_name:
+                    cli_key = k
+                    break
+            if cli_key:
+                self.configs = [c for c in self.configs if c.get('cli_type', 'claude') != cli_key]
 
         save_configs(self.configs)
         self.refresh_list()
@@ -842,12 +856,15 @@ class App:
             return
 
         api_key = config['provider']['credentials']['api_key']
-        key_name = config['provider'].get('key_name', 'ANTHROPIC_AUTH_TOKEN')
+        key_name = config['provider'].get('key_name', 'ANTHROPIC_API_KEY')
         endpoint = config['provider'].get('endpoint', '')
+        cli_type = config.get('cli_type', 'claude')
+        cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
+        base_url_env = cli_info.get('base_url_env', 'ANTHROPIC_BASE_URL')
 
         text = f"{key_name}: {api_key}"
         if endpoint:
-            text += f"\nANTHROPIC_BASE_URL: {endpoint}"
+            text += f"\n{base_url_env}: {endpoint}"
 
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
@@ -860,35 +877,31 @@ class App:
 
         item = sel[0]
         parent = self.tree.parent(item)
+        grandparent = self.tree.parent(parent) if parent else ''
 
-        if parent:
-            endpoint = self.tree.item(parent, 'text')
-            configs_in_group = sorted([c for c in self.configs if c['provider'].get('endpoint', '未分类') == endpoint], key=lambda c: c.get('order', 999))
-            config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
-            if config and len(configs_in_group) > 1:
-                idx = configs_in_group.index(config)
-                if idx > 0:
-                    config['order'], configs_in_group[idx - 1]['order'] = configs_in_group[idx - 1]['order'], config['order']
-                    save_configs(self.configs)
-                    self.refresh_list()
-        else:
-            endpoint = self.tree.item(item, 'text')
-            current_group = [c for c in self.configs if c['provider'].get('endpoint', '未分类') == endpoint]
-            all_endpoints = sorted(set(c['provider'].get('endpoint', '未分类') for c in self.configs), key=lambda e: min(c.get('order', 999) for c in self.configs if c['provider'].get('endpoint', '未分类') == e))
+        # 只有第三层配置项可以移动
+        if not grandparent:
+            return
 
-            if endpoint in all_endpoints:
-                idx = all_endpoints.index(endpoint)
-                if idx > 0:
-                    prev_endpoint = all_endpoints[idx - 1]
-                    prev_group = [c for c in self.configs if c['provider'].get('endpoint', '未分类') == prev_endpoint]
-                    min_order_current = min(c.get('order', 999) for c in current_group)
-                    min_order_prev = min(c.get('order', 999) for c in prev_group)
-                    for c in current_group:
-                        c['order'] = c['order'] - (min_order_current - min_order_prev)
-                    for c in prev_group:
-                        c['order'] = c['order'] + (min_order_current - min_order_prev)
-                    save_configs(self.configs)
-                    self.refresh_list()
+        endpoint = self.tree.item(parent, 'text')
+        cli_type = self._get_cli_key_from_node(grandparent)
+
+        configs_in_group = sorted([c for c in self.configs if c.get('cli_type', 'claude') == cli_type and c['provider'].get('endpoint', '') == endpoint], key=lambda c: c.get('order', 999))
+        config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
+        if config and len(configs_in_group) > 1:
+            idx = configs_in_group.index(config)
+            if idx > 0:
+                config['order'], configs_in_group[idx - 1]['order'] = configs_in_group[idx - 1]['order'], config['order']
+                save_configs(self.configs)
+                self.refresh_list()
+
+    def _get_cli_key_from_node(self, node):
+        """从树节点获取 CLI key"""
+        cli_name = self.tree.item(node, 'text')
+        for k, v in CLI_TOOLS.items():
+            if v['name'] == cli_name:
+                return k
+        return 'claude'
 
     def move_down(self):
         sel = self.tree.selection()
@@ -897,35 +910,23 @@ class App:
 
         item = sel[0]
         parent = self.tree.parent(item)
+        grandparent = self.tree.parent(parent) if parent else ''
 
-        if parent:
-            endpoint = self.tree.item(parent, 'text')
-            configs_in_group = sorted([c for c in self.configs if c['provider'].get('endpoint', '未分类') == endpoint], key=lambda c: c.get('order', 999))
-            config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
-            if config and len(configs_in_group) > 1:
-                idx = configs_in_group.index(config)
-                if idx < len(configs_in_group) - 1:
-                    config['order'], configs_in_group[idx + 1]['order'] = configs_in_group[idx + 1]['order'], config['order']
-                    save_configs(self.configs)
-                    self.refresh_list()
-        else:
-            endpoint = self.tree.item(item, 'text')
-            current_group = [c for c in self.configs if c['provider'].get('endpoint', '未分类') == endpoint]
-            all_endpoints = sorted(set(c['provider'].get('endpoint', '未分类') for c in self.configs), key=lambda e: min(c.get('order', 999) for c in self.configs if c['provider'].get('endpoint', '未分类') == e))
+        # 只有第三层配置项可以移动
+        if not grandparent:
+            return
 
-            if endpoint in all_endpoints:
-                idx = all_endpoints.index(endpoint)
-                if idx < len(all_endpoints) - 1:
-                    next_endpoint = all_endpoints[idx + 1]
-                    next_group = [c for c in self.configs if c['provider'].get('endpoint', '未分类') == next_endpoint]
-                    min_order_current = min(c.get('order', 999) for c in current_group)
-                    min_order_next = min(c.get('order', 999) for c in next_group)
-                    for c in current_group:
-                        c['order'] = c['order'] + (min_order_next - min_order_current)
-                    for c in next_group:
-                        c['order'] = c['order'] - (min_order_next - min_order_current)
-                    save_configs(self.configs)
-                    self.refresh_list()
+        endpoint = self.tree.item(parent, 'text')
+        cli_type = self._get_cli_key_from_node(grandparent)
+
+        configs_in_group = sorted([c for c in self.configs if c.get('cli_type', 'claude') == cli_type and c['provider'].get('endpoint', '') == endpoint], key=lambda c: c.get('order', 999))
+        config = self.get_config_by_id(self.tree.item(item, 'tags')[0])
+        if config and len(configs_in_group) > 1:
+            idx = configs_in_group.index(config)
+            if idx < len(configs_in_group) - 1:
+                config['order'], configs_in_group[idx + 1]['order'] = configs_in_group[idx + 1]['order'], config['order']
+                save_configs(self.configs)
+                self.refresh_list()
 
     def get_python_activation_command(self, python_env_name):
         """获取Python环境激活命令"""
@@ -949,7 +950,7 @@ class App:
 
         return ""
 
-    def build_powershell_env_command(self, key_name, api_key, endpoint=''):
+    def build_powershell_env_command(self, key_name, api_key, endpoint='', base_url_env='ANTHROPIC_BASE_URL'):
         """构建PowerShell环境变量设置命令"""
         # 检查key_name中是否有特殊字符（如破折号）
         has_special_chars = '-' in key_name or any(c in key_name for c in [':', '.', '[', ']', '$'])
@@ -962,16 +963,16 @@ class App:
             cmd_parts = [f'$env:{key_name}="{api_key}"']
 
         if endpoint:
-            cmd_parts.append(f'$env:ANTHROPIC_BASE_URL="{endpoint}"')
+            cmd_parts.append(f'$env:{base_url_env}="{endpoint}"')
 
         return '; '.join(cmd_parts)
 
-    def build_cmd_env_command(self, key_name, api_key, endpoint=''):
+    def build_cmd_env_command(self, key_name, api_key, endpoint='', base_url_env='ANTHROPIC_BASE_URL'):
         """构建CMD环境变量设置命令"""
         cmd_parts = [f'set "{key_name}={api_key}"']
 
         if endpoint:
-            cmd_parts.append(f'set ANTHROPIC_BASE_URL={endpoint}')
+            cmd_parts.append(f'set {base_url_env}={endpoint}')
 
         return ' && '.join(cmd_parts)
 
@@ -986,8 +987,13 @@ class App:
             return
 
         api_key = config['provider']['credentials']['api_key']
-        key_name = config['provider'].get('key_name', 'ANTHROPIC_AUTH_TOKEN')
+        key_name = config['provider'].get('key_name', 'ANTHROPIC_API_KEY')
         endpoint = config['provider'].get('endpoint', '')
+        cli_type = config.get('cli_type', 'claude')
+        cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
+        cli_command = cli_info['command']
+        base_url_env = cli_info.get('base_url_env', 'ANTHROPIC_BASE_URL')
+
         terminal_name = self.terminal_var.get()
         if terminal_name not in self.available_terminals:
             messagebox.showerror(self.L['error'], self.L['terminal_unavailable'])
@@ -1003,7 +1009,7 @@ class App:
             env = os.environ.copy()
             env[key_name] = api_key
             if endpoint:
-                env['ANTHROPIC_BASE_URL'] = endpoint
+                env[base_url_env] = endpoint
             # 设置 UTF-8 编码环境变量，解决 conda 输出编码问题
             env['PYTHONIOENCODING'] = 'utf-8'
 
@@ -1017,11 +1023,12 @@ class App:
                 # 详细调试输出
                 print("=========================================")
                 print("=== 终端打开调试信息 ===")
+                print(f"CLI工具: {cli_type} ({cli_command})")
                 print(f"选择的Python环境: {python_env_name}")
                 print(f"激活命令: '{activation_cmd}'")
                 print(f"终端类型: {terminal_name}")
                 print(f"终端命令: {terminal_cmd}")
-                print(f"API密钥: {key_name}")
+                print(f"API密钥变量: {key_name}")
                 print(f"端点: {endpoint}")
                 print(f"工作目录: {cwd}")
                 print("=========================================")
@@ -1031,15 +1038,8 @@ class App:
 
                 if terminal_cmd == 'pwsh':
                     if activation_cmd:
-                        env_cmd = self.build_powershell_env_command(key_name, api_key, endpoint)
-                        provider_type = config['provider'].get('type', '')
-                        if provider_type == 'gemini':
-                            script_dir = os.path.dirname(__file__)
-                            proxy_script = os.path.join(script_dir, 'gemini_api_proxy.py')
-                            init_cmd = f'Start-Process -WindowStyle Hidden python "{proxy_script}"; Start-Sleep -Seconds 3; '
-                        else:
-                            init_cmd = ''
-                        full_cmd = f'{utf8_prefix}{env_cmd}; {init_cmd}{activation_cmd}; claude'
+                        env_cmd = self.build_powershell_env_command(key_name, api_key, endpoint, base_url_env)
+                        full_cmd = f'{utf8_prefix}{env_cmd}; {activation_cmd}; {cli_command}'
                         print(f"PowerShell完整命令: {full_cmd}")
                         run_terminal(['pwsh', '-NoExit', '-Command', full_cmd], env, cwd)
                     else:
@@ -1047,15 +1047,8 @@ class App:
 
                 elif terminal_cmd == 'powershell':
                     if activation_cmd:
-                        env_cmd = self.build_powershell_env_command(key_name, api_key, endpoint)
-                        provider_type = config['provider'].get('type', '')
-                        if provider_type == 'gemini':
-                            script_dir = os.path.dirname(__file__)
-                            proxy_script = os.path.join(script_dir, 'gemini_api_proxy.py')
-                            init_cmd = f'Start-Process -WindowStyle Hidden python "{proxy_script}"; Start-Sleep -Seconds 3; '
-                        else:
-                            init_cmd = ''
-                        full_cmd = f'{utf8_prefix}{env_cmd}; {init_cmd}{activation_cmd}; claude'
+                        env_cmd = self.build_powershell_env_command(key_name, api_key, endpoint, base_url_env)
+                        full_cmd = f'{utf8_prefix}{env_cmd}; {activation_cmd}; {cli_command}'
                         print(f"PowerShell完整命令: {full_cmd}")
                         run_terminal(['powershell', '-NoExit', '-Command', full_cmd], env, cwd)
                     else:
@@ -1065,15 +1058,8 @@ class App:
                     if activation_cmd:
                         env_cmd = f'export {key_name}="{api_key}"'
                         if endpoint:
-                            env_cmd += f'; export ANTHROPIC_BASE_URL="{endpoint}"'
-                        provider_type = config['provider'].get('type', '')
-                        if provider_type == 'gemini':
-                            script_dir = os.path.dirname(__file__)
-                            proxy_script = os.path.join(script_dir, 'gemini_api_proxy.py')
-                            init_cmd = f'python "{proxy_script}" &; sleep 3; '
-                        else:
-                            init_cmd = ''
-                        full_cmd = f'{env_cmd}; {init_cmd}{activation_cmd}; claude'
+                            env_cmd += f'; export {base_url_env}="{endpoint}"'
+                        full_cmd = f'{env_cmd}; {activation_cmd}; {cli_command}'
                         print(f"Git Bash完整命令: {full_cmd}")
                         run_terminal([terminal_cmd, '-i', '-c', full_cmd], env, cwd)
                     else:
@@ -1082,17 +1068,8 @@ class App:
                 else:
                     # CMD
                     if activation_cmd:
-                        env_cmd = self.build_cmd_env_command(key_name, api_key, endpoint)
-                        provider_type = config['provider'].get('type', '')
-                        if provider_type == 'gemini':
-                            script_dir = os.path.dirname(__file__)
-                            proxy_script = os.path.join(script_dir, 'gemini_api_proxy.py')
-                            init_cmd = f'start /min python "{proxy_script}" && timeout /t 3 /nobreak && '
-                            proxy_env_cmd = f'set ANTHROPIC_BASE_URL=http://127.0.0.1:8765 && set ANTHROPIC_AUTH_TOKEN=gemini-proxy-token && set HTTP_PROXY=http://127.0.0.1:7890 && set HTTPS_PROXY=http://127.0.0.1:7890 && '
-                        else:
-                            init_cmd = ''
-                            proxy_env_cmd = ''
-                        full_cmd = f'{env_cmd} && {proxy_env_cmd}{init_cmd}{activation_cmd} && claude'
+                        env_cmd = self.build_cmd_env_command(key_name, api_key, endpoint, base_url_env)
+                        full_cmd = f'{env_cmd} && {activation_cmd} && {cli_command}'
                         print(f"CMD完整命令: {full_cmd}")
                         run_terminal(['cmd', '/k', full_cmd], env, cwd)
                     else:
@@ -1280,6 +1257,9 @@ if __name__ == '__main__':
         sys.exit(0)
 
     root = tk.Tk()
+    icon_path = Path(__file__).parent / 'icon.ico'
+    if icon_path.exists():
+        root.iconbitmap(str(icon_path))
     root.attributes('-topmost', True)
     root.after(100, lambda: root.attributes('-topmost', False))
     app = App(root)

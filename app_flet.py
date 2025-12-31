@@ -14,10 +14,43 @@ import re
 import urllib.request
 import sqlite3
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import time  # DEBUG
+import threading
 
 DEBUG = False  # 调试开关
+TRASH_RETENTION_DAYS = 7  # 回收站保留天数
+
+THEMES = {
+    "light": {
+        "bg": "#f8f9fa",
+        "surface": "#ffffff",
+        "text": "#333333",
+        "text_sec": "#666666",
+        "primary": "#607d8b",
+        "border": "#e0e0e0",
+        "header_bg": ft.Colors.GREY_100,
+        "selection_bg": ft.Colors.BLUE_50,
+        "icon_cli": ft.Colors.BLUE,
+        "icon_endpoint": ft.Colors.GREEN,
+        "icon_key_selected": ft.Colors.ORANGE,
+        "text_selected": ft.Colors.BLUE,
+    },
+    "dark": {
+        "bg": "#1e1e1e",
+        "surface": "#252526",
+        "text": "#cccccc",
+        "text_sec": "#999999",
+        "primary": "#546e7a",
+        "border": "#3e3e42",
+        "header_bg": "#2d2d30",
+        "selection_bg": "#2f3d58",
+        "icon_cli": "#64b5f6",
+        "icon_endpoint": "#81c784",
+        "icon_key_selected": "#ffb74d",
+        "text_selected": "#64b5f6",
+    }
+}
 
 def debug_print(msg):
     if DEBUG:
@@ -413,6 +446,302 @@ class MCPRegistry:
 # 全局 MCP 仓库实例
 mcp_registry = MCPRegistry(MCP_DB_FILE)
 
+# ========== Claude 历史记录管理 ==========
+CLAUDE_DIR = Path(os.path.expanduser("~")) / ".claude"
+
+class TrashManager:
+    """回收站管理器"""
+    def __init__(self, claude_dir: Path):
+        self.claude_dir = claude_dir
+        self.trash_dir = claude_dir / "trash"
+        self.trash_dir.mkdir(exist_ok=True)
+        self.manifest_file = self.trash_dir / "manifest.json"
+
+    def _load_manifest(self) -> dict:
+        if self.manifest_file.exists():
+            try:
+                return json.loads(self.manifest_file.read_text(encoding='utf-8'))
+            except:
+                pass
+        return {"items": []}
+
+    def _save_manifest(self, manifest: dict):
+        self.manifest_file.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
+
+    def move_to_trash(self, session_id: str, project_name: str, session_file: Path, file_history_dir: Path | None = None) -> bool:
+        try:
+            timestamp = int(time.time())
+            item_dir = self.trash_dir / f"{session_id}_{timestamp}"
+            item_dir.mkdir(exist_ok=True)
+            if session_file.exists():
+                shutil.move(str(session_file), str(item_dir / session_file.name))
+            if file_history_dir and file_history_dir.exists():
+                shutil.move(str(file_history_dir), str(item_dir / "file-history"))
+            manifest = self._load_manifest()
+            manifest["items"].append({
+                "session_id": session_id, "project_name": project_name,
+                "deleted_at": timestamp, "dir_name": item_dir.name,
+                "original_file": str(session_file),
+                "original_file_history": str(file_history_dir) if file_history_dir else None
+            })
+            self._save_manifest(manifest)
+            return True
+        except:
+            return False
+
+    def restore_from_trash(self, item: dict) -> bool:
+        try:
+            item_dir = self.trash_dir / item["dir_name"]
+            if not item_dir.exists():
+                return False
+            original_file = Path(item["original_file"])
+            original_file.parent.mkdir(parents=True, exist_ok=True)
+            for f in item_dir.glob("*.jsonl"):
+                shutil.move(str(f), str(original_file))
+                break
+            if item.get("original_file_history"):
+                fh_src = item_dir / "file-history"
+                if fh_src.exists():
+                    shutil.move(str(fh_src), item["original_file_history"])
+            shutil.rmtree(item_dir, ignore_errors=True)
+            manifest = self._load_manifest()
+            manifest["items"] = [i for i in manifest["items"] if i["session_id"] != item["session_id"]]
+            self._save_manifest(manifest)
+            return True
+        except:
+            return False
+
+    def cleanup_expired(self) -> int:
+        manifest = self._load_manifest()
+        now = time.time()
+        cutoff = now - (TRASH_RETENTION_DAYS * 24 * 3600)
+        removed = 0
+        remaining = []
+        for item in manifest["items"]:
+            if item["deleted_at"] < cutoff:
+                shutil.rmtree(self.trash_dir / item["dir_name"], ignore_errors=True)
+                removed += 1
+            else:
+                remaining.append(item)
+        manifest["items"] = remaining
+        self._save_manifest(manifest)
+        return removed
+
+    def get_trash_items(self) -> list:
+        return self._load_manifest().get("items", [])
+
+    def permanently_delete(self, item: dict):
+        shutil.rmtree(self.trash_dir / item["dir_name"], ignore_errors=True)
+        manifest = self._load_manifest()
+        manifest["items"] = [i for i in manifest["items"] if i["dir_name"] != item["dir_name"]]
+        self._save_manifest(manifest)
+
+
+class HistoryManager:
+    """Claude 历史记录管理器"""
+    def __init__(self, claude_dir: Path):
+        self.claude_dir = claude_dir
+        self.trash_manager = TrashManager(claude_dir)
+
+    def load_sessions(self, callback=None) -> dict:
+        """加载所有会话数据"""
+        projects_dir = self.claude_dir / "projects"
+        result = {}
+        if not projects_dir.exists():
+            return result
+        project_dirs = list(projects_dir.iterdir())
+        for project_dir in project_dirs:
+            if not project_dir.is_dir():
+                continue
+            if callback:
+                callback(f"扫描: {project_dir.name[:30]}...")
+            project_name = project_dir.name
+            result[project_name] = {}
+            for session_file in project_dir.glob("*.jsonl"):
+                if session_file.name.startswith("agent-"):
+                    continue
+                session_id = session_file.stem
+                info = self._parse_session(session_file)
+                if info:
+                    result[project_name][session_id] = info
+        return result
+
+    def _parse_session(self, session_file: Path) -> dict | None:
+        try:
+            messages = []
+            first_ts, last_ts, cwd = None, None, None
+            with open(session_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if data.get('type') in ('user', 'assistant'):
+                            ts = data.get('timestamp')
+                            if ts:
+                                if not first_ts:
+                                    first_ts = ts
+                                last_ts = ts
+                            if not cwd:
+                                cwd = data.get('cwd')
+                            messages.append(data)
+                    except:
+                        pass
+            if not messages:
+                return None
+            return {
+                'file': session_file, 'messages': messages, 'message_count': len(messages),
+                'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
+                'size': session_file.stat().st_size
+            }
+        except:
+            return None
+
+    def delete_session(self, project_name: str, session_id: str, info: dict) -> bool:
+        file_history_dir = self.claude_dir / "file-history" / session_id
+        success = self.trash_manager.move_to_trash(
+            session_id, project_name, info['file'],
+            file_history_dir if file_history_dir.exists() else None
+        )
+        if success:
+            self._remove_from_history(session_id)
+        return success
+
+    def _remove_from_history(self, session_id: str):
+        history_file = self.claude_dir / "history.jsonl"
+        if not history_file.exists():
+            return
+        try:
+            lines = []
+            with open(history_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            if data.get('sessionId') != session_id:
+                                lines.append(line)
+                        except:
+                            lines.append(line)
+            with open(history_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+        except:
+            pass
+
+    def export_to_markdown(self, session_id: str, info: dict) -> str:
+        lines = [f"# 会话: {session_id}\n", f"路径: {info.get('cwd', '未知')}\n\n---\n\n"]
+        for msg in info['messages']:
+            role = msg.get('message', {}).get('role', '未知')
+            ts = msg.get('timestamp', '')
+            content = msg.get('message', {}).get('content', [])
+            text = ""
+            if isinstance(content, list):
+                for c in content:
+                    if isinstance(c, dict) and c.get('type') == 'text':
+                        text += c.get('text', '')
+            elif isinstance(content, str):
+                text = content
+            lines.append(f"## {role.upper()} ({ts[:19] if ts else ''})\n\n{text}\n\n---\n\n")
+        return ''.join(lines)
+
+
+class CodexHistoryManager:
+    """Codex 历史记录管理器"""
+    def __init__(self, codex_dir: Path):
+        self.codex_dir = codex_dir
+        self.trash_manager = TrashManager(codex_dir)
+
+    def load_sessions(self, callback=None) -> dict:
+        """加载所有会话数据，按日期分组"""
+        sessions_dir = self.codex_dir / "sessions"
+        result = {}
+        if not sessions_dir.exists():
+            return result
+        # 遍历 sessions/YYYY/MM/DD/*.jsonl
+        for session_file in sessions_dir.rglob("*.jsonl"):
+            if callback:
+                callback(f"扫描: {session_file.name[:30]}...")
+            # 从路径提取日期作为分组
+            parts = session_file.relative_to(sessions_dir).parts
+            if len(parts) >= 3:
+                date_group = f"{parts[0]}-{parts[1]}-{parts[2]}"
+            else:
+                date_group = "未知日期"
+            if date_group not in result:
+                result[date_group] = {}
+            session_id = session_file.stem.replace("rollout-", "")
+            info = self._parse_session(session_file)
+            if info:
+                result[date_group][session_id] = info
+        return result
+
+    def _parse_session(self, session_file: Path) -> dict | None:
+        try:
+            messages = []
+            first_ts, last_ts, cwd = None, None, None
+            with open(session_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        ts = data.get('timestamp')
+                        if ts:
+                            if not first_ts:
+                                first_ts = ts
+                            last_ts = ts
+                        # 提取 cwd
+                        if data.get('type') == 'session_meta':
+                            cwd = data.get('payload', {}).get('cwd')
+                        # 提取消息
+                        if data.get('type') == 'response_item':
+                            payload = data.get('payload', {})
+                            if payload.get('type') == 'message':
+                                messages.append(payload)
+                        elif data.get('type') == 'event_msg':
+                            payload = data.get('payload', {})
+                            if payload.get('type') in ('user_message', 'agent_message'):
+                                messages.append({'role': 'user' if 'user' in payload.get('type') else 'assistant',
+                                                'content': payload.get('message', '')})
+                    except:
+                        pass
+            if not messages:
+                return None
+            return {
+                'file': session_file, 'messages': messages, 'message_count': len(messages),
+                'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
+                'size': session_file.stat().st_size
+            }
+        except:
+            return None
+
+    def delete_session(self, date_group: str, session_id: str, info: dict) -> bool:
+        return self.trash_manager.move_to_trash(session_id, date_group, info['file'])
+
+    def export_to_markdown(self, session_id: str, info: dict) -> str:
+        lines = [f"# Codex 会话: {session_id}\n", f"路径: {info.get('cwd', '未知')}\n\n---\n\n"]
+        for msg in info['messages']:
+            role = msg.get('role', '未知')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                text = ""
+                for c in content:
+                    if isinstance(c, dict) and c.get('type') in ('input_text', 'output_text'):
+                        text += c.get('text', '')
+            else:
+                text = str(content)
+            lines.append(f"## {role.upper()}\n\n{text}\n\n---\n\n")
+        return ''.join(lines)
+
+
+# 全局历史管理器实例
+CODEX_DIR = Path(os.path.expanduser("~")) / ".codex"
+KIRO_DIR = Path(os.path.expanduser("~")) / ".kiro"
+history_manager = HistoryManager(CLAUDE_DIR) if CLAUDE_DIR.exists() else None
+codex_history_manager = CodexHistoryManager(CODEX_DIR) if CODEX_DIR.exists() else None
+
+# 全局历史缓存（避免重复加载）
+history_cache = {"claude": {}, "codex": {}}
+
 # 提示词标识符（用于检测和同步）
 SYSTEM_PROMPT_START = "<!-- GLOBAL_PROMPT_START -->"
 SYSTEM_PROMPT_END = "<!-- GLOBAL_PROMPT_END -->"
@@ -665,6 +994,25 @@ LANG = {
         'copy_key': '复制KEY',
         'exported_to': '配置已导出到: {}',
         'imported_count': '已导入 {} 个配置',
+        # 历史管理
+        'history': '历史记录',
+        'history_sessions': '会话数',
+        'history_messages': '消息数',
+        'history_size': '占用空间',
+        'history_refresh': '刷新',
+        'history_delete': '删除',
+        'history_trash': '回收站',
+        'history_export': '导出MD',
+        'history_copy_resume': '复制resume',
+        'history_search': '搜索会话...',
+        'history_old': '30天前 ({}个)',
+        'history_confirm_delete': '确定删除 {} 个会话？\n会话将移动到回收站，{}天后自动清理。',
+        'history_moved': '已移动 {} 个会话到回收站',
+        'history_restored': '已恢复 {} 个会话',
+        'history_trash_info': '回收站中的会话将在 {} 天后自动删除',
+        'history_restore': '恢复',
+        'history_perm_delete': '永久删除',
+        'history_clear_trash': '清空回收站',
     },
     'en': {
         'title': 'LiangMu-Studio API Key v{}',
@@ -715,6 +1063,25 @@ LANG = {
         'copy_key': 'Copy',
         'exported_to': 'Config exported to: {}',
         'imported_count': 'Imported {} configs',
+        # History
+        'history': 'History',
+        'history_sessions': 'Sessions',
+        'history_messages': 'Messages',
+        'history_size': 'Size',
+        'history_refresh': 'Refresh',
+        'history_delete': 'Delete',
+        'history_trash': 'Trash',
+        'history_export': 'Export MD',
+        'history_copy_resume': 'Copy Resume',
+        'history_search': 'Search sessions...',
+        'history_old': 'Over 30 days ({})',
+        'history_confirm_delete': 'Delete {} sessions?\nThey will be moved to trash and auto-deleted after {} days.',
+        'history_moved': 'Moved {} sessions to trash',
+        'history_restored': 'Restored {} sessions',
+        'history_trash_info': 'Sessions in trash will be auto-deleted after {} days',
+        'history_restore': 'Restore',
+        'history_perm_delete': 'Delete Permanently',
+        'history_clear_trash': 'Empty Trash',
     }
 }
 
@@ -820,12 +1187,26 @@ def main(page: ft.Page):
     settings = load_settings()
     lang = settings.get('lang', 'zh')
     L = LANG[lang]
+    theme_mode = settings.get('theme', 'light')
 
     page.title = L['title'].format(VERSION)
     page.window.width = 1100
     page.window.height = 700
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.theme = ft.Theme(font_family="Microsoft YaHei UI, Segoe UI, sans-serif")
+    page.theme_mode = ft.ThemeMode.DARK if theme_mode == 'dark' else ft.ThemeMode.LIGHT
+    page.theme = ft.Theme(
+        font_family="Microsoft YaHei UI, Segoe UI, sans-serif",
+        tooltip_theme=ft.TooltipTheme(wait_duration=200),
+    )
+    page.bgcolor = THEMES[theme_mode]["bg"]
+
+    def toggle_theme(e):
+        nonlocal theme_mode
+        theme_mode = "dark" if theme_mode == "light" else "light"
+        page.theme_mode = ft.ThemeMode.DARK if theme_mode == 'dark' else ft.ThemeMode.LIGHT
+        page.bgcolor = THEMES[theme_mode]["bg"]
+        settings['theme'] = theme_mode
+        save_settings(settings)
+        page.update()
 
     # 设置窗口图标
     icon_path = Path(__file__).parent / "icon.ico"
@@ -884,6 +1265,7 @@ def main(page: ft.Page):
     def refresh_config_list():
         config_tree.controls.clear()
         tree = build_tree_structure()
+        theme = THEMES[theme_mode]
 
         for cli_type in tree:
             cli_name = CLI_TOOLS.get(cli_type, {}).get('name', cli_type)
@@ -893,14 +1275,14 @@ def main(page: ft.Page):
             # CLI 工具层（第一级）
             cli_header = ft.Container(
                 content=ft.Row([
-                    ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_cli_expanded else ft.Icons.ARROW_RIGHT, size=20),
-                    ft.Icon(ft.Icons.TERMINAL, color=ft.Colors.BLUE),
-                    ft.Text(cli_name, weight=ft.FontWeight.BOLD),
-                    ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=ft.Colors.GREY_600),
+                    ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_cli_expanded else ft.Icons.ARROW_RIGHT, size=20, color=theme['text']),
+                    ft.Icon(ft.Icons.TERMINAL, color=theme['icon_cli']),
+                    ft.Text(cli_name, weight=ft.FontWeight.BOLD, color=theme['text']),
+                    ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=theme['text_sec']),
                 ], spacing=5),
                 padding=ft.padding.only(left=5, top=8, bottom=8),
                 on_click=lambda e, k=cli_key: toggle_cli(k),
-                bgcolor=ft.Colors.GREY_100,
+                bgcolor=theme['header_bg'],
                 border_radius=4,
             )
             config_tree.controls.append(cli_header)
@@ -914,10 +1296,10 @@ def main(page: ft.Page):
                     # API 端点层（第二级）
                     endpoint_header = ft.Container(
                         content=ft.Row([
-                            ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_endpoint_expanded else ft.Icons.ARROW_RIGHT, size=18),
-                            ft.Icon(ft.Icons.LINK, size=16, color=ft.Colors.GREEN),
-                            ft.Text(short_endpoint, size=13),
-                            ft.Text(f"({len(tree[cli_type][endpoint])})", color=ft.Colors.GREY_600, size=12),
+                            ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_endpoint_expanded else ft.Icons.ARROW_RIGHT, size=18, color=theme['text']),
+                            ft.Icon(ft.Icons.LINK, size=16, color=theme['icon_endpoint']),
+                            ft.Text(short_endpoint, size=13, color=theme['text']),
+                            ft.Text(f"({len(tree[cli_type][endpoint])})", color=theme['text_sec'], size=12),
                         ], spacing=5),
                         padding=ft.padding.only(left=30, top=6, bottom=6),
                         on_click=lambda e, k=endpoint_key: toggle_endpoint(k),
@@ -931,13 +1313,13 @@ def main(page: ft.Page):
                             config_item = ft.GestureDetector(
                                 content=ft.Container(
                                     content=ft.Row([
-                                        ft.Icon(ft.Icons.KEY, size=16, color=ft.Colors.ORANGE if is_selected else ft.Colors.GREY_600),
+                                        ft.Icon(ft.Icons.KEY, size=16, color=theme['icon_key_selected'] if is_selected else ft.Colors.GREY_600),
                                         ft.Text(cfg.get('label', 'Unnamed'),
                                                weight=ft.FontWeight.BOLD if is_selected else None,
-                                               color=ft.Colors.BLUE if is_selected else None),
+                                               color=theme['text_selected'] if is_selected else theme['text']),
                                     ], spacing=5),
                                     padding=ft.padding.only(left=60, top=5, bottom=5),
-                                    bgcolor=ft.Colors.BLUE_50 if is_selected else None,
+                                    bgcolor=theme['selection_bg'] if is_selected else None,
                                     border_radius=4,
                                 ),
                                 on_tap=lambda e, i=idx: select_config(i),
@@ -2359,6 +2741,678 @@ def main(page: ft.Page):
         ft.Container(mcp_tree, expand=True, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8),
     ], expand=True, spacing=10)
 
+    # ========== 历史记录管理页面（Tab 结构：Claude / Codex / Kiro）==========
+    # 当前选中的 CLI 类型
+    current_cli = "claude"
+    selected_sessions = {}  # {session_id: data}
+    all_session_items = []  # [(item, item_data), ...]
+    last_clicked_idx = -1
+    history_tree = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True)
+    history_stats = ft.Text("", size=12, color=ft.Colors.GREY_600)
+    history_progress = ft.ProgressBar(visible=False, width=200)
+    history_search = ft.TextField(hint_text=L['history_search'], width=250, on_submit=lambda e: refresh_history_tree(e.control.value or ""))
+    history_detail = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def get_current_manager():
+        if current_cli == "claude":
+            return history_manager
+        elif current_cli == "codex":
+            return codex_history_manager
+        # gemini 和 aider 暂不支持
+        return None
+
+    def get_history_data():
+        """获取当前CLI的历史数据（使用缓存）"""
+        global history_cache
+        if history_cache.get(current_cli):
+            return history_cache[current_cli]
+        mgr = get_current_manager()
+        if mgr:
+            history_cache[current_cli] = mgr.load_sessions()
+        return history_cache.get(current_cli, {})
+
+    def refresh_history_tree(filter_text: str = ""):
+        nonlocal last_clicked_idx, all_session_items
+        selected_sessions.clear()
+        all_session_items = []
+        last_clicked_idx = -1
+        history_tree.controls.clear()
+        history_progress.visible = True
+        page.update()
+        mgr = get_current_manager()
+        if current_cli in ("gemini", "aider"):
+            history_tree.controls.append(ft.Text(f"{current_cli.title()} 历史记录暂不支持（格式不兼容）", color=ft.Colors.ORANGE))
+            history_stats.value = ""
+            history_progress.visible = False
+            page.update()
+            return
+        if not mgr:
+            history_tree.controls.append(ft.Text(f"{current_cli.title()} 目录不存在", color=ft.Colors.RED))
+            history_stats.value = ""
+            history_progress.visible = False
+            page.update()
+            return
+        # 加载数据（使用缓存）
+        history_data = get_history_data()
+        if not history_data:
+            history_stats.value = "无历史记录"
+            history_progress.visible = False
+            page.update()
+            return
+        # 统计
+        total_sessions = sum(len(s) for s in history_data.values())
+        total_messages = sum(info['message_count'] for grp in history_data.values() for info in grp.values())
+        total_size = sum(info.get('size', 0) for grp in history_data.values() for info in grp.values())
+        size_str = f"{total_size / 1024 / 1024:.1f} MB" if total_size > 1024*1024 else f"{total_size / 1024:.1f} KB"
+        history_stats.value = f"{L['history_sessions']}: {total_sessions} | {L['history_messages']}: {total_messages} | {L['history_size']}: {size_str}"
+        # 构建树
+        filter_text = filter_text.lower()
+        now = datetime.now().astimezone()
+        today = now.date()
+        # 日期筛选
+        if date_filter == "today":
+            date_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            date_cutoff_end = None
+        elif date_filter == "week":
+            # 从本周一开始
+            date_cutoff = (now - timedelta(days=today.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            date_cutoff_end = None
+        elif date_filter == "month":
+            # 从本月1号开始
+            date_cutoff = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            date_cutoff_end = None
+        elif date_filter == "custom" and custom_date_from:
+            date_cutoff = custom_date_from.astimezone() if custom_date_from else None
+            date_cutoff_end = custom_date_to.astimezone() if custom_date_to else None
+        else:
+            date_cutoff = None
+            date_cutoff_end = None
+        old_cutoff = now - timedelta(days=30)  # 30天前的归为旧会话
+        old_sessions = []
+
+        def on_item_click(e, idx, data):
+            nonlocal last_clicked_idx
+            theme = THEMES[theme_mode]
+            ctrl = e.control
+            shift = getattr(e, 'shift', False)
+            ctrl_key = getattr(e, 'ctrl', False)
+            if shift and last_clicked_idx >= 0:
+                # Shift多选：选中范围内所有项
+                start, end = min(last_clicked_idx, idx), max(last_clicked_idx, idx)
+                for i in range(start, end + 1):
+                    item, item_data = all_session_items[i]
+                    selected_sessions[item_data['session_id']] = item_data
+                    item.bgcolor = theme['selection_bg']
+            elif ctrl_key:
+                # Ctrl多选：切换单项选中状态
+                if data['session_id'] in selected_sessions:
+                    del selected_sessions[data['session_id']]
+                    ctrl.bgcolor = None
+                else:
+                    selected_sessions[data['session_id']] = data
+                    ctrl.bgcolor = theme['selection_bg']
+            else:
+                # 单击：清除其他选中，只选当前项
+                for item, item_data in all_session_items:
+                    item.bgcolor = None
+                selected_sessions.clear()
+                selected_sessions[data['session_id']] = data
+                ctrl.bgcolor = theme['selection_bg']
+            last_clicked_idx = idx
+            update_selection_buttons()
+            show_session_detail(data)
+            page.update()
+
+        for grp_name, sessions in sorted(history_data.items(), reverse=True):
+            if not sessions:
+                continue
+            grp_items = []
+            for sid, info in sorted(sessions.items(), key=lambda x: x[1].get('last_timestamp', ''), reverse=True):
+                if filter_text and filter_text not in sid.lower() and filter_text not in (info.get('cwd') or '').lower():
+                    continue
+                ts = info.get('last_timestamp', '')
+                dt = None
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        time_str = dt.strftime("%m-%d %H:%M")
+                    except:
+                        time_str = ts[:16]
+                else:
+                    time_str = "未知"
+                # 日期筛选
+                if date_cutoff and dt and dt < date_cutoff:
+                    continue
+                if date_cutoff_end and dt and dt > date_cutoff_end:
+                    continue
+                # 30天前归为旧会话
+                if dt and dt < old_cutoff:
+                    old_sessions.append((grp_name, sid, info, time_str))
+                    continue
+                # 获取首条消息预览
+                preview = ""
+                for msg in info.get('messages', [])[:5]:  # 只看前5条
+                    role = msg.get('message', {}).get('role') if current_cli == "claude" else msg.get('role')
+                    if role == 'user':
+                        content = msg.get('message', {}).get('content', []) if current_cli == "claude" else msg.get('content', '')
+                        if isinstance(content, list):
+                            for c in content:
+                                if isinstance(c, dict) and c.get('type') in ('text', 'input_text'):
+                                    txt = c.get('text', '')
+                                    # 跳过系统消息和XML标签
+                                    if txt.startswith('<') or 'system' in txt[:50].lower():
+                                        continue
+                                    preview = txt[:30].replace('\n', ' ')
+                                    break
+                        elif isinstance(content, str):
+                            if not content.startswith('<'):
+                                preview = content[:30].replace('\n', ' ')
+                        if preview:
+                            break
+                # 格式化大小
+                size = info.get('size', 0)
+                size_str = f"{size/1024/1024:.1f}MB" if size > 1024*1024 else f"{size/1024:.1f}KB" if size > 1024 else f"{size}B"
+                display = f"{sid[:12]}... {preview}" if preview else f"{sid[:12]}..."
+                item_data = {'group': grp_name, 'session_id': sid, 'info': info}
+                idx = len(all_session_items)
+                item = ft.Container(
+                    content=ft.Column([
+                        ft.Text(display, size=13, font_family="SimSun"),
+                        ft.Text(f"{info['message_count']}条 | {time_str} | {size_str}", size=11, color=ft.Colors.GREY_500, font_family="SimSun"),
+                    ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.START),
+                    data={'idx': idx, 'item_data': item_data},
+                    on_click=lambda e, i=idx, d=item_data: on_item_click(e, i, d),
+                    padding=ft.padding.only(left=20, top=5, bottom=5, right=5), border_radius=4,
+                    tooltip=f"ID: {sid}\n路径: {info.get('cwd', '未知')}",
+                    expand=True,
+                )
+                row = ft.Row([item], expand=True)
+                all_session_items.append((item, item_data))
+                grp_items.append(row)
+            if grp_items:
+                # 计算项目大小
+                grp_size = sum(s.get('size', 0) for s in sessions.values())
+                grp_size_str = f"{grp_size/1024/1024:.1f}MB" if grp_size > 1024*1024 else f"{grp_size/1024:.1f}KB"
+                grp_sessions_data = [{'group': grp_name, 'session_id': sid, 'info': info} for sid, info in sessions.items()]
+                history_tree.controls.append(ft.ExpansionTile(
+                    title=ft.Text(grp_name[:40], size=14, weight=ft.FontWeight.W_500),
+                    subtitle=ft.Text(f"{len(grp_items)} 个会话 | {grp_size_str}", size=11),
+                    controls=[ft.Column(grp_items, horizontal_alignment=ft.CrossAxisAlignment.START)],
+                    initially_expanded=len(history_data) <= 3,
+                    trailing=ft.IconButton(
+                        icon=ft.Icons.DELETE_OUTLINE, icon_size=18,
+                        tooltip="删除此项目所有会话",
+                        on_click=lambda _, data=grp_sessions_data: delete_sessions(data),
+                    ),
+                ))
+        if old_sessions:
+            old_items = []
+            for grp, sid, info, ts in old_sessions:
+                item_data = {'group': grp, 'session_id': sid, 'info': info}
+                idx = len(all_session_items)
+                item = ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"{sid[:12]}...", size=13, color=ft.Colors.GREY_600, font_family="SimSun"),
+                        ft.Text(f"{grp[:20]} | {ts}", size=11, color=ft.Colors.GREY_500, font_family="SimSun"),
+                    ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.START),
+                    data={'idx': idx, 'item_data': item_data},
+                    on_click=lambda e, i=idx, d=item_data: on_item_click(e, i, d),
+                    padding=ft.padding.only(left=20, top=5, bottom=5, right=5), border_radius=4,
+                    expand=True,
+                )
+                row = ft.Row([item], expand=True)
+                all_session_items.append((item, item_data))
+                old_items.append(row)
+            history_tree.controls.append(ft.ExpansionTile(
+                title=ft.Text(L['history_old'].format(len(old_sessions)), size=14, color=ft.Colors.GREY_600),
+                controls=[ft.Column(old_items, horizontal_alignment=ft.CrossAxisAlignment.START)], initially_expanded=False,
+            ))
+        history_progress.visible = False
+        page.update()
+
+    def show_session_detail(data):
+        history_detail.controls.clear()
+        if not data:
+            return
+        info, sid = data['info'], data['session_id']
+        history_detail.controls.append(ft.Text(f"会话: {sid}", size=14, weight=ft.FontWeight.BOLD))
+        history_detail.controls.append(ft.Text(f"路径: {info.get('cwd', '未知')}", size=12, color=ft.Colors.GREY_600))
+        resume_cmd = f"claude --resume {sid}" if current_cli == "claude" else f"codex --resume {sid}"
+        history_detail.controls.append(ft.Row([
+            ft.TextButton("复制ID", on_click=lambda _: copy_to_clipboard(sid)),
+            ft.TextButton("复制resume", on_click=lambda _: copy_to_clipboard(resume_cmd)),
+            ft.TextButton("导出MD", on_click=lambda _: export_session(sid, info)),
+            ft.TextButton("打开位置", on_click=lambda _: open_file_location(info)),
+        ], spacing=5))
+        history_detail.controls.append(ft.Divider())
+        for msg in info['messages']:
+            if current_cli == "claude":
+                role = msg.get('message', {}).get('role', '未知')
+                ts = msg.get('timestamp', '')
+                content = msg.get('message', {}).get('content', [])
+                text = ""
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') == 'text':
+                            text += c.get('text', '')
+                elif isinstance(content, str):
+                    text = content
+            else:  # codex
+                role = msg.get('role', '未知')
+                ts = ""
+                content = msg.get('content', '')
+                if isinstance(content, list):
+                    text = ""
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') in ('input_text', 'output_text'):
+                            text += c.get('text', '')
+                else:
+                    text = str(content)
+            color = ft.Colors.with_opacity(0.15, ft.Colors.BLUE) if role == 'user' else ft.Colors.with_opacity(0.15, ft.Colors.GREEN)
+            full_text = text  # 保存完整文本用于弹窗
+            history_detail.controls.append(ft.GestureDetector(
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"{role.upper()} ({ts[:19] if ts else ''})", size=12, weight=ft.FontWeight.BOLD, font_family="SimSun"),
+                        ft.Text(text[:500] + ('...' if len(text) > 500 else ''), size=14, font_family="SimSun"),
+                    ]),
+                    bgcolor=color, padding=10, border_radius=8, margin=ft.margin.only(bottom=5),
+                ),
+                on_double_tap=lambda _, t=full_text, r=role, ts_=ts: show_message_detail(t, r, ts_),
+            ))
+        page.update()
+
+    def show_message_detail(text, role, ts):
+        """双击消息显示完整内容"""
+        dlg = ft.AlertDialog(
+            title=ft.Text(f"{role.upper()} ({ts[:19] if ts else ''})"),
+            content=ft.Column([
+                ft.TextField(value=text, multiline=True, read_only=True, min_lines=10, max_lines=20),
+            ], width=600, scroll=ft.ScrollMode.AUTO),
+            actions=[
+                ft.TextButton("复制", on_click=lambda _: copy_to_clipboard(text)),
+                ft.TextButton("关闭", on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+            ],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def copy_to_clipboard(text):
+        page.set_clipboard(text)
+        page.open(ft.SnackBar(ft.Text(f"已复制: {text[:50]}...")))
+        page.update()
+
+    def open_file_location(info):
+        file_path = info.get('file')
+        if not file_path:
+            return
+        import subprocess, sys
+        if sys.platform == 'win32':
+            subprocess.run(['explorer', '/select,', str(file_path)])
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', '-R', str(file_path)])
+        else:
+            subprocess.run(['xdg-open', str(Path(file_path).parent)])
+
+    def export_session(sid, info):
+        mgr = get_current_manager()
+        if not mgr:
+            return
+        md = mgr.export_to_markdown(sid, info)
+        export_path = Path.home() / "Downloads" / f"{current_cli}_{sid[:12]}.md"
+        export_path.write_text(md, encoding='utf-8')
+        page.open(ft.SnackBar(ft.Text(f"已导出: {export_path}")))
+        page.update()
+
+    def delete_sessions(sessions_data):
+        mgr = get_current_manager()
+        if not sessions_data or not mgr:
+            return
+        def do_delete(e):
+            global history_cache
+            dlg.open = False
+            page.update()
+            count = 0
+            cache = history_cache.get(current_cli, {})
+            for data in sessions_data:
+                if mgr.delete_session(data['group'], data['session_id'], data['info']):
+                    if data['group'] in cache:
+                        cache[data['group']].pop(data['session_id'], None)
+                    count += 1
+            page.open(ft.SnackBar(ft.Text(L['history_moved'].format(count))))
+            refresh_history_tree(history_search.value or "")
+        dlg = ft.AlertDialog(
+            title=ft.Text(L['confirm_delete']),
+            content=ft.Text(L['history_confirm_delete'].format(len(sessions_data), TRASH_RETENTION_DAYS)),
+            actions=[ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+                     ft.TextButton(L['delete'], on_click=do_delete)],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def show_trash_dialog(_):
+        mgr = get_current_manager()
+        if not mgr:
+            return
+        items = mgr.trash_manager.get_trash_items()
+        selected_trash = {}
+
+        def on_trash_click(e, item):
+            if item['session_id'] in selected_trash:
+                del selected_trash[item['session_id']]
+                e.control.bgcolor = None
+            else:
+                selected_trash[item['session_id']] = item
+                e.control.bgcolor = ft.Colors.BLUE_100
+            page.update()
+
+        trash_list = ft.Column([
+            ft.Container(
+                content=ft.ListTile(
+                    title=ft.Text(f"{item['session_id'][:12]}...", size=13),
+                    subtitle=ft.Text(
+                        f"{item['project_name']} | 删除于 {datetime.fromtimestamp(item['deleted_at']).strftime('%m-%d %H:%M')} | 剩余 {max(0, TRASH_RETENTION_DAYS - (time.time() - item['deleted_at']) / 86400):.1f} 天",
+                        size=11
+                    ),
+                ),
+                data=item,
+                on_click=lambda e, it=item: on_trash_click(e, it),
+                border_radius=4,
+            ) for item in items
+        ], scroll=ft.ScrollMode.AUTO, height=300)
+
+        def restore_selected(_):
+            global history_cache
+            count = 0
+            for item in selected_trash.values():
+                if mgr.trash_manager.restore_from_trash(item):
+                    count += 1
+            if count:
+                history_cache[current_cli] = {}
+                refresh_history_tree()
+            dlg.open = False
+            page.open(ft.SnackBar(ft.Text(f"已恢复 {count} 个会话")))
+            page.update()
+
+        def delete_selected(_):
+            for item in selected_trash.values():
+                mgr.trash_manager.permanently_delete(item)
+            dlg.open = False
+            page.open(ft.SnackBar(ft.Text(f"已永久删除 {len(selected_trash)} 个会话")))
+            page.update()
+
+        def clear_all(_):
+            for item in items:
+                mgr.trash_manager.permanently_delete(item)
+            dlg.open = False
+            page.open(ft.SnackBar(ft.Text("回收站已清空")))
+            page.update()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L['history_trash']),
+            content=ft.Column([
+                ft.Text(L['history_trash_info'].format(TRASH_RETENTION_DAYS), size=12),
+                ft.Text("点击选中，支持多选", size=11, color=ft.Colors.GREY_500),
+                trash_list
+            ], width=450),
+            actions=[
+                ft.TextButton("恢复选中", on_click=restore_selected),
+                ft.TextButton("永久删除选中", on_click=delete_selected),
+                ft.TextButton("清空回收站", on_click=clear_all),
+                ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update())
+            ],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def show_cleanup_dialog(_):
+        """清理对话框：删除短会话、30天前会话、空目录"""
+        mgr = get_current_manager()
+        if not mgr:
+            return
+        history_data = get_history_data()
+
+        def get_total_chars(info):
+            total = 0
+            for msg in info.get('messages', []):
+                content = msg.get('message', {}).get('content', []) if current_cli == "claude" else msg.get('content', '')
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') in ('text', 'input_text'):
+                            total += len(c.get('text', ''))
+                elif isinstance(content, str):
+                    total += len(content)
+            return total
+
+        # 短会话: ≤3条消息且≤150字
+        short_sessions = []
+        for grp, sessions in history_data.items():
+            for sid, info in sessions.items():
+                chars = get_total_chars(info)
+                if info.get('message_count', 0) <= 3 and chars <= 150:
+                    short_sessions.append({'group': grp, 'session_id': sid, 'info': info, 'chars': chars})
+
+        # 30天前会话
+        old_cutoff = datetime.now().astimezone() - timedelta(days=30)
+        old_sessions = []
+        for grp, sessions in history_data.items():
+            for sid, info in sessions.items():
+                ts = info.get('last_timestamp', '')
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        if dt < old_cutoff:
+                            old_sessions.append({'group': grp, 'session_id': sid, 'info': info})
+                    except:
+                        pass
+
+        # 空项目目录
+        empty_dirs = []
+        if current_cli == "claude":
+            projects_dir = Path.home() / ".claude" / "projects"
+            if projects_dir.exists():
+                for d in projects_dir.iterdir():
+                    if d.is_dir() and not any(f.suffix == '.jsonl' for f in d.iterdir() if f.is_file()):
+                        empty_dirs.append(d)
+
+        chk_short = ft.Checkbox(label=f"短会话（≤3条且≤150字）: {len(short_sessions)}个", value=True)
+        chk_old = ft.Checkbox(label=f"30天前会话: {len(old_sessions)}个", value=False)
+        chk_empty = ft.Checkbox(label=f"空项目目录: {len(empty_dirs)}个", value=False)
+
+        # 预览列表
+        preview_list = ft.Column([], scroll=ft.ScrollMode.AUTO, height=200)
+
+        def update_preview(_=None):
+            preview_list.controls.clear()
+            if chk_short.value and short_sessions:
+                preview_list.controls.append(ft.Text("短会话:", weight=ft.FontWeight.BOLD, size=12))
+                for s in short_sessions[:10]:
+                    preview_list.controls.append(ft.Text(f"  {s['session_id'][:12]}... ({s['info']['message_count']}条, {s['chars']}字)", size=11, color=ft.Colors.GREY_600))
+                if len(short_sessions) > 10:
+                    preview_list.controls.append(ft.Text(f"  ...还有 {len(short_sessions)-10} 个", size=11, color=ft.Colors.GREY_500))
+            if chk_old.value and old_sessions:
+                preview_list.controls.append(ft.Text("30天前会话:", weight=ft.FontWeight.BOLD, size=12))
+                for s in old_sessions[:10]:
+                    preview_list.controls.append(ft.Text(f"  {s['session_id'][:12]}...", size=11, color=ft.Colors.GREY_600))
+                if len(old_sessions) > 10:
+                    preview_list.controls.append(ft.Text(f"  ...还有 {len(old_sessions)-10} 个", size=11, color=ft.Colors.GREY_500))
+            if chk_empty.value and empty_dirs:
+                preview_list.controls.append(ft.Text("空目录:", weight=ft.FontWeight.BOLD, size=12))
+                for d in empty_dirs[:5]:
+                    preview_list.controls.append(ft.Text(f"  {d.name}", size=11, color=ft.Colors.GREY_600))
+                if len(empty_dirs) > 5:
+                    preview_list.controls.append(ft.Text(f"  ...还有 {len(empty_dirs)-5} 个", size=11, color=ft.Colors.GREY_500))
+            page.update()
+
+        chk_short.on_change = update_preview
+        chk_old.on_change = update_preview
+        chk_empty.on_change = update_preview
+        update_preview()
+
+        def do_cleanup(_):
+            global history_cache
+            count = 0
+            if chk_short.value:
+                for data in short_sessions:
+                    if mgr.delete_session(data['group'], data['session_id'], data['info']):
+                        count += 1
+            if chk_old.value:
+                for data in old_sessions:
+                    if mgr.delete_session(data['group'], data['session_id'], data['info']):
+                        count += 1
+            dir_count = 0
+            if chk_empty.value:
+                import shutil
+                for d in empty_dirs:
+                    try:
+                        shutil.rmtree(d)
+                        dir_count += 1
+                    except:
+                        pass
+            history_cache[current_cli] = {}
+            dlg.open = False
+            page.open(ft.SnackBar(ft.Text(f"已清理 {count} 个会话, {dir_count} 个空目录")))
+            refresh_history_tree()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("清理会话"),
+            content=ft.Column([
+                chk_short, chk_old, chk_empty,
+                ft.Divider(),
+                ft.Text("预览:", size=12, weight=ft.FontWeight.BOLD),
+                preview_list,
+                ft.Text("清理后会话将移至回收站", size=11, color=ft.Colors.GREY_600),
+            ], width=400, spacing=5),
+            actions=[
+                ft.TextButton("执行清理", on_click=do_cleanup),
+                ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+            ],
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    # 批量操作按钮
+    batch_delete_btn = ft.TextButton(
+        "删除选中", visible=False,
+        on_click=lambda e: delete_sessions(list(selected_sessions.values()))
+    )
+    batch_count_text = ft.Text("", size=12)
+
+    def update_selection_buttons():
+        batch_delete_btn.visible = len(selected_sessions) > 0
+        batch_count_text.value = f"已选 {len(selected_sessions)} 项" if selected_sessions else ""
+        page.update()
+
+    cli_dropdown = ft.Dropdown(
+        value="claude",
+        options=[
+            ft.dropdown.Option("claude", "Claude"),
+            ft.dropdown.Option("codex", "Codex"),
+            ft.dropdown.Option("gemini", "Gemini"),
+            ft.dropdown.Option("aider", "Aider"),
+        ],
+        width=120,
+        on_change=lambda _: refresh_with_cli_check(),
+    )
+
+    def refresh_with_cli_check(_=None):
+        nonlocal current_cli
+        new_cli = cli_dropdown.value or "claude"
+        if new_cli != current_cli:
+            current_cli = new_cli
+            history_detail.controls.clear()
+        refresh_history_tree(history_search.value or "")
+
+    # 日期筛选
+    date_filter = "all"
+    custom_date_from = None
+    custom_date_to = None
+
+    date_dropdown = ft.Dropdown(
+        value="all",
+        options=[
+            ft.dropdown.Option("all", "全部"),
+            ft.dropdown.Option("today", "今天"),
+            ft.dropdown.Option("week", "本周"),
+            ft.dropdown.Option("month", "本月"),
+            ft.dropdown.Option("custom", "自定义"),
+        ],
+        width=100,
+        on_change=lambda _: refresh_with_date_check(),
+    )
+
+    date_from_btn = ft.TextButton("起始日期", visible=False)
+    date_to_btn = ft.TextButton("结束日期", visible=False)
+
+    def on_date_from_picked(e):
+        nonlocal custom_date_from
+        if e.control.value:
+            custom_date_from = e.control.value
+            date_from_btn.text = custom_date_from.strftime("%Y-%m-%d")
+            page.update()
+
+    def on_date_to_picked(e):
+        nonlocal custom_date_to
+        if e.control.value:
+            custom_date_to = e.control.value.replace(hour=23, minute=59, second=59)
+            date_to_btn.text = custom_date_to.strftime("%Y-%m-%d")
+            page.update()
+
+    date_from_picker = ft.DatePicker(on_change=on_date_from_picked)
+    date_to_picker = ft.DatePicker(on_change=on_date_to_picked)
+    page.overlay.extend([date_from_picker, date_to_picker])
+
+    date_from_btn.on_click = lambda _: page.open(date_from_picker)
+    date_to_btn.on_click = lambda _: page.open(date_to_picker)
+
+    def refresh_with_date_check(_=None):
+        nonlocal date_filter
+        new_filter = date_dropdown.value or "all"
+        date_filter = new_filter
+        if new_filter == "custom":
+            date_from_btn.visible = True
+            date_to_btn.visible = True
+        else:
+            date_from_btn.visible = False
+            date_to_btn.visible = False
+        refresh_with_cli_check()
+
+    history_page = ft.Column([
+        ft.Row([
+            ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD),
+            cli_dropdown,
+            date_dropdown,
+            date_from_btn,
+            date_to_btn,
+            history_search,
+            ft.TextButton("刷新", on_click=refresh_with_date_check),
+            ft.TextButton("回收站", on_click=show_trash_dialog),
+            ft.TextButton("清理", on_click=show_cleanup_dialog),
+            batch_count_text,
+            batch_delete_btn,
+            history_progress,
+        ], wrap=True),
+        history_stats,
+        ft.Row([
+            ft.Container(history_tree, expand=2, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10),
+            ft.Container(history_detail, expand=3, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10),
+        ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START),
+    ], expand=True, spacing=10)
+
+    # 键盘快捷键
+    def on_keyboard(e: ft.KeyboardEvent):
+        if content_area.content != history_page:
+            return
+        if e.key == "Delete" and selected_sessions:
+            delete_sessions(list(selected_sessions.values()))
+        elif e.key == "F5":
+            refresh_history_tree(history_search.value or "")
+    page.on_keyboard_event = on_keyboard
+
     # ========== 导航和页面切换 ==========
     content_area = ft.Container(api_page, expand=True, padding=20)
 
@@ -2373,6 +3427,14 @@ def main(page: ft.Page):
         elif idx == 2:
             content_area.content = mcp_page
             refresh_mcp_tree()
+        elif idx == 3:
+            content_area.content = history_page
+            if not history_cache.get(current_cli) or not history_tree.controls:
+                page.update()
+                async def load_history():
+                    refresh_history_tree()
+                page.run_task(load_history)
+                return
         page.update()
 
     nav_rail = ft.NavigationRail(
@@ -2384,10 +3446,12 @@ def main(page: ft.Page):
             ft.NavigationRailDestination(icon=ft.Icons.KEY, label=L['api_config']),
             ft.NavigationRailDestination(icon=ft.Icons.CHAT, label=L['prompts']),
             ft.NavigationRailDestination(icon=ft.Icons.EXTENSION, label=L['mcp']),
+            ft.NavigationRailDestination(icon=ft.Icons.HISTORY, label=L['history']),
         ],
         on_change=switch_page,
         trailing=ft.Container(
             content=ft.Column([
+                ft.IconButton(ft.Icons.DARK_MODE if theme_mode == 'light' else ft.Icons.LIGHT_MODE, on_click=toggle_theme, tooltip="切换主题"),
                 ft.TextButton("中/EN", icon=ft.Icons.LANGUAGE, on_click=switch_lang),
                 ft.TextButton(L['feedback'], on_click=open_feedback),
             ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
@@ -2406,6 +3470,15 @@ def main(page: ft.Page):
 
     # 初始化列表
     refresh_config_list()
+
+    # 后台预加载历史记录
+    async def preload_history():
+        global history_cache
+        if history_manager:
+            history_cache["claude"] = history_manager.load_sessions()
+        if codex_history_manager:
+            history_cache["codex"] = codex_history_manager.load_sessions()
+    page.run_task(preload_history)
 
     # 首次启动：后台自动刷新终端和环境
     if first_run:

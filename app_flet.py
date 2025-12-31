@@ -35,6 +35,9 @@ THEMES = {
         "icon_endpoint": ft.Colors.GREEN,
         "icon_key_selected": ft.Colors.ORANGE,
         "text_selected": ft.Colors.BLUE,
+        "global_bg": ft.Colors.PURPLE_50,
+        "global_border": ft.Colors.PURPLE_200,
+        "global_icon": ft.Colors.PURPLE,
     },
     "dark": {
         "bg": "#1e1e1e",
@@ -49,6 +52,9 @@ THEMES = {
         "icon_endpoint": "#81c784",
         "icon_key_selected": "#ffb74d",
         "text_selected": "#64b5f6",
+        "global_bg": "#2d2535",
+        "global_border": "#4a3d5c",
+        "global_icon": "#9575cd",
     }
 }
 
@@ -750,46 +756,83 @@ USER_PROMPT_END = "<!-- USER_PROMPT_END -->"
 
 # 内置提示词（来自 AI_talk）
 BUILTIN_PROMPTS = {
-    'blank': {'name': '空白', 'content': '', 'category': '用户', 'is_builtin': True, 'prompt_type': 'user'},
+    'blank': {
+        'name': {'zh': '空白', 'en': 'Blank'},
+        'content': '',
+        'category': {'zh': '用户', 'en': 'User'},
+        'is_builtin': True, 'prompt_type': 'user'
+    },
     'coding_general': {
-        'name': '通用编程',
-        'content': '你是一个专业的编程助手。提供高质量的代码示例和解释。遵循最佳实践和设计模式。考虑性能、安全性和可维护性。提供完整的、可运行的代码。',
-        'category': '编程', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '通用编程', 'en': 'General Coding'},
+        'content': {
+            'zh': '你是一个专业的编程助手。提供高质量的代码示例和解释。遵循最佳实践和设计模式。考虑性能、安全性和可维护性。提供完整的、可运行的代码。',
+            'en': 'You are a professional coding assistant. Provide high-quality code examples and explanations. Follow best practices and design patterns. Consider performance, security, and maintainability. Provide complete, runnable code.'
+        },
+        'category': {'zh': '编程', 'en': 'Coding'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'coding_debug': {
-        'name': '代码调试',
-        'content': '你是一个代码调试专家。帮助用户找出代码中的问题。提供清晰的错误分析和解决方案。逐步解释问题的原因和修复方法。',
-        'category': '编程', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '代码调试', 'en': 'Code Debug'},
+        'content': {
+            'zh': '你是一个代码调试专家。帮助用户找出代码中的问题。提供清晰的错误分析和解决方案。逐步解释问题的原因和修复方法。',
+            'en': 'You are a code debugging expert. Help users find issues in their code. Provide clear error analysis and solutions. Explain the cause and fix step by step.'
+        },
+        'category': {'zh': '编程', 'en': 'Coding'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'coding_review': {
-        'name': '代码审查',
-        'content': '你是一个资深的代码审查员。分析代码质量、可读性和性能。提供具体的改进建议。指出潜在的问题和优化机会。',
-        'category': '编程', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '代码审查', 'en': 'Code Review'},
+        'content': {
+            'zh': '你是一个资深的代码审查员。分析代码质量、可读性和性能。提供具体的改进建议。指出潜在的问题和优化机会。',
+            'en': 'You are a senior code reviewer. Analyze code quality, readability, and performance. Provide specific improvement suggestions. Point out potential issues and optimization opportunities.'
+        },
+        'category': {'zh': '编程', 'en': 'Coding'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'writing_article': {
-        'name': '文章写作',
-        'content': '你是一个专业的文章写手。帮助用户撰写高质量的文章。确保逻辑清晰、表达准确。提供结构建议和内容优化。',
-        'category': '写作', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '文章写作', 'en': 'Article Writing'},
+        'content': {
+            'zh': '你是一个专业的文章写手。帮助用户撰写高质量的文章。确保逻辑清晰、表达准确。提供结构建议和内容优化。',
+            'en': 'You are a professional article writer. Help users write high-quality articles. Ensure clear logic and accurate expression. Provide structure suggestions and content optimization.'
+        },
+        'category': {'zh': '写作', 'en': 'Writing'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'writing_creative': {
-        'name': '创意写作',
-        'content': '你是一个创意写作专家。帮助用户创作故事、诗歌或其他创意内容。提供灵感和创意建议。确保内容生动有趣。',
-        'category': '写作', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '创意写作', 'en': 'Creative Writing'},
+        'content': {
+            'zh': '你是一个创意写作专家。帮助用户创作故事、诗歌或其他创意内容。提供灵感和创意建议。确保内容生动有趣。',
+            'en': 'You are a creative writing expert. Help users create stories, poems, or other creative content. Provide inspiration and creative suggestions. Ensure content is vivid and engaging.'
+        },
+        'category': {'zh': '写作', 'en': 'Writing'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'analysis_data': {
-        'name': '数据分析',
-        'content': '你是一个数据分析专家。深入分析数据和趋势。提供数据支持的观点和结论。用清晰的方式解释复杂的数据。',
-        'category': '分析', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '数据分析', 'en': 'Data Analysis'},
+        'content': {
+            'zh': '你是一个数据分析专家。深入分析数据和趋势。提供数据支持的观点和结论。用清晰的方式解释复杂的数据。',
+            'en': 'You are a data analysis expert. Deeply analyze data and trends. Provide data-supported insights and conclusions. Explain complex data in a clear way.'
+        },
+        'category': {'zh': '分析', 'en': 'Analysis'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'analysis_summary': {
-        'name': '内容总结',
-        'content': '你是一个内容总结专家。快速提取关键信息。用简洁的方式总结复杂内容。突出重点和核心观点。',
-        'category': '分析', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '内容总结', 'en': 'Content Summary'},
+        'content': {
+            'zh': '你是一个内容总结专家。快速提取关键信息。用简洁的方式总结复杂内容。突出重点和核心观点。',
+            'en': 'You are a content summarization expert. Quickly extract key information. Summarize complex content concisely. Highlight key points and core insights.'
+        },
+        'category': {'zh': '分析', 'en': 'Analysis'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
     'image_prompt': {
-        'name': '绘画提示词',
-        'content': '你是AI绘画提示词专家。根据用户提供的文案，生成适合AI绘图的英文提示词。\n\n风格要求：治愈系、卡通漫画、线条画、扁平插画\n\n直接输出英文提示词，不需要解释。\n\n输出格式：[主体描述], [风格], [色彩], [氛围], [细节]',
-        'category': '绘画', 'is_builtin': True, 'prompt_type': 'user'
+        'name': {'zh': '绘画提示词', 'en': 'Image Prompt'},
+        'content': {
+            'zh': '你是AI绘画提示词专家。根据用户提供的文案，生成适合AI绘图的英文提示词。\n\n风格要求：治愈系、卡通漫画、线条画、扁平插画\n\n直接输出英文提示词，不需要解释。\n\n输出格式：[主体描述], [风格], [色彩], [氛围], [细节]',
+            'en': 'You are an AI image prompt expert. Generate English prompts suitable for AI image generation based on user input.\n\nStyle: healing, cartoon, line art, flat illustration\n\nOutput English prompts directly, no explanation needed.\n\nFormat: [subject], [style], [colors], [mood], [details]'
+        },
+        'category': {'zh': '绘画', 'en': 'Art'},
+        'is_builtin': True, 'prompt_type': 'user'
     },
 }
 
@@ -949,6 +992,7 @@ LANG = {
         'title': 'LiangMu-Studio API Key v{}',
         'api_config': 'API 密钥配置',
         'prompts': '提示词',
+        'prompt_builtin': '(内置)',
         'mcp': 'MCP 服务器',
         'add': '新增',
         'edit': '编辑',
@@ -1013,11 +1057,121 @@ LANG = {
         'history_restore': '恢复',
         'history_perm_delete': '永久删除',
         'history_clear_trash': '清空回收站',
+        # MCP
+        'mcp_sync': '同步仓库',
+        'mcp_browse': '浏览仓库',
+        'mcp_import': '导入',
+        'mcp_official': '官方推荐',
+        'mcp_default_hint': '勾选设为默认 MCP（始终加载到全局和工作目录）',
+        'mcp_search': '搜索',
+        'mcp_category': '分类',
+        'mcp_all': '全部',
+        'mcp_selected': '已选: {}',
+        'mcp_add_selected': '添加选中',
+        'mcp_added': '已添加 {} 个 MCP',
+        'mcp_sync_complete': '同步完成：共 {} 个 MCP，新增 {} 个',
+        'mcp_sync_fail': '同步失败 - 调试信息',
+        'mcp_sync_title': '同步 MCP 仓库',
+        'mcp_sync_preparing': '准备同步...',
+        'mcp_sync_sources': '从 PulseMCP、Smithery、GitHub 等源获取...',
+        'mcp_set_default_hint': '设为默认（始终加载）',
+        'mcp_import_title': '导入 MCP',
+        'mcp_import_clipboard': '从剪贴板导入',
+        'mcp_import_clipboard_desc': '直接粘贴 JSON 配置',
+        'mcp_import_file': '从文件导入',
+        'mcp_import_file_desc': '选择 .mcp.json 或其他 JSON 文件',
+        'mcp_import_text': '从文本导入',
+        'mcp_import_text_desc': '手动粘贴 JSON 文本',
+        'mcp_import_format': '支持格式：{"mcpServers": {...}} 或 {"name": {...}}',
+        'mcp_clipboard_empty': '剪贴板为空',
+        'mcp_invalid_json': '剪贴板内容不是有效的 JSON',
+        'mcp_no_valid_config': '未找到有效配置',
+        'mcp_import_fail': '导入失败: {}',
+        'mcp_select_official': '选择官方 MCP 服务器',
+        'mcp_other': '其他',
+        # MCP 分类
+        'mcp_cat_cloud': '云服务', 'mcp_cat_map': '地图', 'mcp_cat_media': '媒体', 'mcp_cat_security': '安全',
+        'mcp_cat_tool': '工具', 'mcp_cat_dev': '开发', 'mcp_cat_search': '搜索', 'mcp_cat_db': '数据库',
+        'mcp_cat_file': '文件', 'mcp_cat_news': '新闻', 'mcp_cat_calendar': '日历', 'mcp_cat_model': '模型',
+        'mcp_cat_browser': '浏览器', 'mcp_cat_game': '游戏', 'mcp_cat_ecommerce': '电商', 'mcp_cat_knowledge': '知识库',
+        'mcp_cat_social': '社交', 'mcp_cat_note': '笔记', 'mcp_cat_network': '网络', 'mcp_cat_design': '设计',
+        'mcp_cat_comm': '通讯', 'mcp_cat_finance': '金融', 'mcp_cat_project': '项目', 'mcp_cat_other': '其他',
+        # Prompts
+        'prompt_global': '全局提示词',
+        'prompt_user': '用户提示词',
+        'prompt_save_global': '保存全局提示词',
+        'prompt_global_saved': '全局提示词已保存',
+        'prompt_builtin_readonly': '内置提示词不可编辑',
+        'prompt_apply': '应用提示词',
+        'prompt_select_mcp': '选择 MCP',
+        'prompt_select_workdir': '请先选择工作目录',
+        'prompt_written': '已写入: {}',
+        'prompt_write_fail': '写入失败: {}',
+        'prompt_loaded': '已加载工作目录配置',
+        'prompt_loaded_with': '已加载工作目录配置 | 提示词: {}',
+        'prompt_no_config': '已选择工作目录（无现有配置）',
+        'prompt_select_extra_mcp': '选择额外 MCP（默认 MCP 已自动加载）',
+        'prompt_apply_btn': '应用',
+        # History detail
+        'history_session': '会话: {}',
+        'history_path': '路径: {}',
+        'history_copy_id': '复制ID',
+        'history_export_md': '导出MD',
+        'history_open_location': '打开位置',
+        'history_expand_middle': '▼ 展开中间 {} 条消息 ▼',
+        'history_no_content': '(无文本内容)',
+        'history_tool': '[工具: {}]',
+        'history_tool_result': '[工具结果]',
+        'history_unknown': '未知',
+        'history_unknown_date': '未知日期',
+        'history_no_records': '无历史记录',
+        'history_copied': '已复制: {}...',
+        'history_exported': '已导出: {}',
+        'history_click_hint': '点击选中，支持多选',
+        'history_short_sessions': '短会话:',
+        'history_empty_dirs': '空目录:',
+        'history_cleanup': '清理会话',
+        'history_cleanup_preview': '预览:',
+        'history_cleanup_hint': '清理后会话将移至回收站',
+        'history_cleanup_execute': '执行清理',
+        'history_cleanup_done': '已清理 {} 个会话, {} 个空目录',
+        'history_trash_cleared': '回收站已清空',
+        'history_perm_deleted': '已永久删除 {} 个会话',
+        'history_delete_selected': '删除选中',
+        'history_delete_project': '删除此项目所有会话',
+        # Date filter
+        'date_all': '全部',
+        'date_today': '今天',
+        'date_week': '本周',
+        'date_month': '本月',
+        'date_custom': '自定义',
+        'date_from': '起始日期',
+        'date_to': '结束日期',
+        # Terminal
+        'terminal_issues': '检测到以下问题：',
+        'terminal_continue': '继续启动',
+        # Theme
+        'toggle_theme': '切换主题',
+        'switch_lang': '中/EN',
+        'close': '关闭',
+        # MCP Repository
+        'mcp_repo_title': 'MCP 仓库 ({} 个)',
+        'mcp_updated': '更新: {}',
+        'mcp_resync': '重新同步',
+        'mcp_more_hint': '... 还有更多，请使用搜索缩小范围',
+        'mcp_market': 'MCP市场',
+        'mcp_not_synced': '未同步',
+        # History cleanup
+        'history_selected_count': '已选 {} 项',
+        'history_short_label': '短会话（≤3条且≤150字）: {}个',
+        'history_old_label': '30天前会话: {}个',
+        'history_empty_label': '空项目目录: {}个',
     },
     'en': {
         'title': 'LiangMu-Studio API Key v{}',
         'api_config': 'API Key Config',
         'prompts': 'Prompts',
+        'prompt_builtin': '(Built-in)',
         'mcp': 'MCP Servers',
         'add': 'Add',
         'edit': 'Edit',
@@ -1082,8 +1236,123 @@ LANG = {
         'history_restore': 'Restore',
         'history_perm_delete': 'Delete Permanently',
         'history_clear_trash': 'Empty Trash',
+        # MCP
+        'mcp_sync': 'Sync Repository',
+        'mcp_browse': 'Browse Repository',
+        'mcp_import': 'Import',
+        'mcp_official': 'Official',
+        'mcp_default_hint': 'Check to set as default MCP (always loaded)',
+        'mcp_search': 'Search',
+        'mcp_category': 'Category',
+        'mcp_all': 'All',
+        'mcp_selected': 'Selected: {}',
+        'mcp_add_selected': 'Add Selected',
+        'mcp_added': 'Added {} MCP(s)',
+        'mcp_sync_complete': 'Sync complete: {} MCPs, {} new',
+        'mcp_sync_fail': 'Sync Failed - Debug Info',
+        'mcp_sync_title': 'Sync MCP Repository',
+        'mcp_sync_preparing': 'Preparing to sync...',
+        'mcp_sync_sources': 'Fetching from PulseMCP, Smithery, GitHub...',
+        'mcp_set_default_hint': 'Set as default (always load)',
+        'mcp_import_title': 'Import MCP',
+        'mcp_import_clipboard': 'From Clipboard',
+        'mcp_import_clipboard_desc': 'Paste JSON config directly',
+        'mcp_import_file': 'From File',
+        'mcp_import_file_desc': 'Select .mcp.json or other JSON file',
+        'mcp_import_text': 'From Text',
+        'mcp_import_text_desc': 'Paste JSON text manually',
+        'mcp_import_format': 'Format: {"mcpServers": {...}} or {"name": {...}}',
+        'mcp_clipboard_empty': 'Clipboard is empty',
+        'mcp_invalid_json': 'Invalid JSON in clipboard',
+        'mcp_no_valid_config': 'No valid config found',
+        'mcp_import_fail': 'Import failed: {}',
+        'mcp_select_official': 'Select Official MCP Servers',
+        'mcp_other': 'Other',
+        # MCP categories
+        'mcp_cat_cloud': 'Cloud', 'mcp_cat_map': 'Map', 'mcp_cat_media': 'Media', 'mcp_cat_security': 'Security',
+        'mcp_cat_tool': 'Tools', 'mcp_cat_dev': 'Dev', 'mcp_cat_search': 'Search', 'mcp_cat_db': 'Database',
+        'mcp_cat_file': 'File', 'mcp_cat_news': 'News', 'mcp_cat_calendar': 'Calendar', 'mcp_cat_model': 'Model',
+        'mcp_cat_browser': 'Browser', 'mcp_cat_game': 'Game', 'mcp_cat_ecommerce': 'E-commerce', 'mcp_cat_knowledge': 'Knowledge',
+        'mcp_cat_social': 'Social', 'mcp_cat_note': 'Note', 'mcp_cat_network': 'Network', 'mcp_cat_design': 'Design',
+        'mcp_cat_comm': 'Comm', 'mcp_cat_finance': 'Finance', 'mcp_cat_project': 'Project', 'mcp_cat_other': 'Other',
+        # Prompts
+        'prompt_global': 'Global Prompt',
+        'prompt_user': 'User Prompts',
+        'prompt_save_global': 'Save Global Prompt',
+        'prompt_global_saved': 'Global prompt saved',
+        'prompt_builtin_readonly': 'Built-in prompts are read-only',
+        'prompt_apply': 'Apply Prompt',
+        'prompt_select_mcp': 'Select MCP',
+        'prompt_select_workdir': 'Please select work directory first',
+        'prompt_written': 'Written to: {}',
+        'prompt_write_fail': 'Write failed: {}',
+        'prompt_loaded': 'Work directory config loaded',
+        'prompt_loaded_with': 'Config loaded | Prompt: {}',
+        'prompt_no_config': 'Work directory selected (no existing config)',
+        'prompt_select_extra_mcp': 'Select extra MCP (default MCPs auto-loaded)',
+        'prompt_apply_btn': 'Apply',
+        # History detail
+        'history_session': 'Session: {}',
+        'history_path': 'Path: {}',
+        'history_copy_id': 'Copy ID',
+        'history_export_md': 'Export MD',
+        'history_open_location': 'Open Location',
+        'history_expand_middle': '▼ Expand {} messages ▼',
+        'history_no_content': '(no text content)',
+        'history_tool': '[Tool: {}]',
+        'history_tool_result': '[Tool Result]',
+        'history_unknown': 'Unknown',
+        'history_unknown_date': 'Unknown Date',
+        'history_no_records': 'No history records',
+        'history_copied': 'Copied: {}...',
+        'history_exported': 'Exported: {}',
+        'history_click_hint': 'Click to select, multi-select supported',
+        'history_short_sessions': 'Short sessions:',
+        'history_empty_dirs': 'Empty directories:',
+        'history_cleanup': 'Cleanup Sessions',
+        'history_cleanup_preview': 'Preview:',
+        'history_cleanup_hint': 'Sessions will be moved to trash',
+        'history_cleanup_execute': 'Execute Cleanup',
+        'history_cleanup_done': 'Cleaned {} sessions, {} empty dirs',
+        'history_trash_cleared': 'Trash cleared',
+        'history_perm_deleted': 'Permanently deleted {} sessions',
+        'history_delete_selected': 'Delete Selected',
+        'history_delete_project': 'Delete all sessions in project',
+        # Date filter
+        'date_all': 'All',
+        'date_today': 'Today',
+        'date_week': 'This Week',
+        'date_month': 'This Month',
+        'date_custom': 'Custom',
+        'date_from': 'From',
+        'date_to': 'To',
+        # Terminal
+        'terminal_issues': 'Issues detected:',
+        'terminal_continue': 'Continue Anyway',
+        # Theme
+        'toggle_theme': 'Toggle Theme',
+        'switch_lang': 'EN/中',
+        'close': 'Close',
+        # MCP Repository
+        'mcp_repo_title': 'MCP Repository ({})',
+        'mcp_updated': 'Updated: {}',
+        'mcp_resync': 'Re-sync',
+        'mcp_more_hint': '... more results, use search to narrow down',
+        'mcp_market': 'MCP Market',
+        'mcp_not_synced': 'Not synced',
+        # History cleanup
+        'history_selected_count': 'Selected: {}',
+        'history_short_label': 'Short sessions (≤3 msgs, ≤150 chars): {}',
+        'history_old_label': 'Sessions over 30 days: {}',
+        'history_empty_label': 'Empty project dirs: {}',
     }
 }
+
+def get_localized(value, lang='zh'):
+    """获取本地化文本，支持字典或字符串"""
+    if isinstance(value, dict):
+        return value.get(lang, value.get('zh', value.get('en', '')))
+    return value
 
 # 数据加载/保存函数
 def load_configs():
@@ -1098,7 +1367,7 @@ def save_configs(configs):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-def load_prompts():
+def load_prompts(lang='zh'):
     """加载提示词，合并内置和自定义"""
     custom = {}
     if PROMPTS_FILE.exists():
@@ -1107,7 +1376,14 @@ def load_prompts():
     # 合并：内置 + 自定义
     all_prompts = {}
     for pid, p in BUILTIN_PROMPTS.items():
-        all_prompts[pid] = {**p, 'id': pid}
+        all_prompts[pid] = {
+            'id': pid,
+            'name': get_localized(p.get('name', ''), lang),
+            'content': get_localized(p.get('content', ''), lang),
+            'category': get_localized(p.get('category', ''), lang),
+            'is_builtin': p.get('is_builtin', False),
+            'prompt_type': p.get('prompt_type', 'user'),
+        }
     for pid, p in custom.items():
         all_prompts[pid] = {**p, 'id': pid}
     return all_prompts
@@ -1217,13 +1493,20 @@ def main(page: ft.Page):
     configs = load_configs()
     debug_print("加载提示词...")
     prompt_db = PromptDB(DB_FILE)
-    # 迁移旧数据并初始化内置提示词
+    # 迁移旧数据并初始化内置提示词（使用当前语言）
     for pid, p in BUILTIN_PROMPTS.items():
         if not prompt_db.get_all().get(pid):
-            prompt_db.save({'id': pid, **p})
+            prompt_db.save({
+                'id': pid,
+                'name': get_localized(p.get('name', ''), lang),
+                'content': get_localized(p.get('content', ''), lang),
+                'category': get_localized(p.get('category', ''), lang),
+                'is_builtin': p.get('is_builtin', False),
+                'prompt_type': p.get('prompt_type', 'user'),
+            })
     # 从旧 JSON 迁移
     if PROMPTS_FILE.exists():
-        old_prompts = load_prompts()
+        old_prompts = load_prompts(lang)
         prompt_db.migrate_from_json(old_prompts)
     prompts = prompt_db.get_all()
     debug_print("加载MCP...")
@@ -1584,7 +1867,7 @@ def main(page: ft.Page):
             page.update()
             return
         if not work_dir_field.value:
-            page.open(ft.SnackBar(ft.Text("请先选择工作目录")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_select_workdir'])))
             page.update()
             return
 
@@ -1601,9 +1884,9 @@ def main(page: ft.Page):
 
         try:
             file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_field.value)
-            page.open(ft.SnackBar(ft.Text(f"已写入: {file_path}")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_written'].format(file_path))))
         except Exception as ex:
-            page.open(ft.SnackBar(ft.Text(f"写入失败: {ex}")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_write_fail'].format(ex))))
         page.update()
 
     work_dir_field = ft.TextField(label=L['work_dir'], value=settings.get('work_dir', ''), expand=True)
@@ -1612,7 +1895,7 @@ def main(page: ft.Page):
     def show_mcp_selector(e):
         """显示 MCP 选择弹窗（非默认的 MCP）"""
         if not work_dir_field.value:
-            page.open(ft.SnackBar(ft.Text("请先选择工作目录")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_select_workdir'])))
             page.update()
             return
 
@@ -1632,7 +1915,7 @@ def main(page: ft.Page):
                         ft.Icon(ft.Icons.EXTENSION, color=ft.Colors.GREEN if is_checked else ft.Colors.GREY_400),
                         ft.Column([
                             ft.Text(m.get('name', 'Unnamed'), weight=ft.FontWeight.BOLD if is_checked else None),
-                            ft.Text(f"{m.get('category', '其他')} | {m.get('command', '')} {m.get('args', '')[:30]}", size=10, color=ft.Colors.GREY_500),
+                            ft.Text(f"{m.get('category', L['mcp_other'])} | {m.get('command', '')} {m.get('args', '')[:30]}", size=10, color=ft.Colors.GREY_500),
                         ], spacing=0, expand=True),
                     ], spacing=10),
                     padding=8,
@@ -1652,16 +1935,16 @@ def main(page: ft.Page):
             # 同步到工作目录（需要在 MCP 页面定义后调用）
             sync_mcp_to_workdir_from_api()
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text("MCP 配置已更新")))
+            page.open(ft.SnackBar(ft.Text(L['saved'])))
             page.update()
 
         build_selector_list()
         dlg = ft.AlertDialog(
-            title=ft.Text("选择额外 MCP（默认 MCP 已自动加载）"),
+            title=ft.Text(L['prompt_select_extra_mcp']),
             content=ft.Container(mcp_selector_list, width=500, height=400),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
-                ft.ElevatedButton("应用", on_click=apply_selection),
+                ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+                ft.ElevatedButton(L['prompt_apply_btn'], on_click=apply_selection),
             ],
         )
         page.overlay.append(dlg)
@@ -1696,11 +1979,11 @@ def main(page: ft.Page):
             preview = (user_content or sys_content or '')[:50]
             if len(preview) == 50:
                 preview += '...'
-            page.open(ft.SnackBar(ft.Text(f"已加载工作目录配置 | 提示词: {preview}")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_loaded_with'].format(preview))))
         elif prompt_path.exists():
-            page.open(ft.SnackBar(ft.Text("已加载工作目录配置")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_loaded'])))
         else:
-            page.open(ft.SnackBar(ft.Text("已选择工作目录（无现有配置）")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_no_config'])))
 
     def browse_folder(e):
         def on_result(result: ft.FilePickerResultEvent):
@@ -1808,15 +2091,14 @@ def main(page: ft.Page):
                     page.update()
                     do_open_terminal()
                 dlg = ft.AlertDialog(
-                    title=ft.Text("MCP 配置问题", color=ft.Colors.ORANGE),
+                    title=ft.Text("MCP Config Issue", color=ft.Colors.ORANGE),
                     content=ft.Column([
-                        ft.Text("检测到以下问题："),
+                        ft.Text(L['terminal_issues']),
                         ft.Text(error_text, size=12, color=ft.Colors.RED),
-                        ft.Text("\n是否仍要启动终端？", size=12),
                     ], tight=True),
                     actions=[
-                        ft.TextButton("取消", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
-                        ft.ElevatedButton("继续启动", on_click=continue_anyway),
+                        ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+                        ft.ElevatedButton(L['terminal_continue'], on_click=continue_anyway),
                     ],
                 )
                 page.overlay.append(dlg)
@@ -1904,8 +2186,8 @@ def main(page: ft.Page):
         # 第三行：提示词和 MCP 选择
         ft.Row([
             prompt_dropdown,
-            ft.ElevatedButton("应用提示词", icon=ft.Icons.SEND, on_click=apply_selected_prompt),
-            ft.ElevatedButton("选择 MCP", icon=ft.Icons.EXTENSION, on_click=show_mcp_selector),
+            ft.ElevatedButton(L['prompt_apply'], icon=ft.Icons.SEND, on_click=apply_selected_prompt),
+            ft.ElevatedButton(L['prompt_select_mcp'], icon=ft.Icons.EXTENSION, on_click=show_mcp_selector),
         ]),
     ], expand=True, spacing=10)
 
@@ -1921,7 +2203,7 @@ def main(page: ft.Page):
     # 全局提示词编辑区
     system_prompt = prompt_db.get_system_prompt()
     global_prompt_content = ft.TextField(
-        label="全局提示词内容（始终附加在所有提示词前面）",
+        label=L['prompt_global'],
         multiline=True,
         min_lines=4,
         value=system_prompt.get('content', '') if system_prompt else '',
@@ -1933,10 +2215,10 @@ def main(page: ft.Page):
         """保存全局提示词"""
         nonlocal system_prompt
         if not system_prompt:
-            system_prompt = {'id': 'system_global', 'name': '全局提示词', 'prompt_type': 'system', 'category': '全局'}
+            system_prompt = {'id': 'system_global', 'name': L['prompt_global'], 'prompt_type': 'system', 'category': L['prompt_global']}
         system_prompt['content'] = global_prompt_content.value or ''
         prompt_db.save(system_prompt)
-        page.open(ft.SnackBar(ft.Text("全局提示词已保存")))
+        page.open(ft.SnackBar(ft.Text(L['prompt_global_saved'])))
         page.update()
 
     def build_prompt_tree():
@@ -1969,7 +2251,7 @@ def main(page: ft.Page):
                 ], spacing=5),
                 padding=ft.padding.only(left=5, top=8, bottom=8),
                 on_click=lambda e, c=cat: toggle_category(c),
-                bgcolor=ft.Colors.GREY_100,
+                bgcolor=THEMES[theme_mode]['header_bg'],
                 border_radius=4,
             )
             prompt_tree.controls.append(cat_header)
@@ -1984,7 +2266,7 @@ def main(page: ft.Page):
                             ft.Text(p.get('name', 'Unnamed'),
                                    weight=ft.FontWeight.BOLD if is_selected else None,
                                    color=ft.Colors.BLUE if is_selected else None),
-                            ft.Text("(内置)" if is_builtin else "", size=10, color=ft.Colors.GREY_500),
+                            ft.Text(L['prompt_builtin'] if is_builtin else "", size=10, color=ft.Colors.GREY_500),
                         ], spacing=5),
                         padding=ft.padding.only(left=30, top=5, bottom=5),
                         on_click=lambda e, i=pid: select_prompt(i),
@@ -2013,7 +2295,7 @@ def main(page: ft.Page):
         if selected_prompt and not prompts.get(selected_prompt, {}).get('is_builtin'):
             show_prompt_dialog(selected_prompt)
         elif selected_prompt:
-            page.open(ft.SnackBar(ft.Text("内置提示词不可编辑")))
+            page.open(ft.SnackBar(ft.Text(L['prompt_builtin_readonly'])))
             page.update()
 
     def delete_prompt(e):
@@ -2098,22 +2380,21 @@ def main(page: ft.Page):
         ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Icon(ft.Icons.PUBLIC, color=ft.Colors.PURPLE),
-                    ft.Text("全局提示词", size=16, weight=ft.FontWeight.BOLD),
-                    ft.Text("（始终附加在所有用户提示词前面）", size=12, color=ft.Colors.GREY_600),
+                    ft.Icon(ft.Icons.PUBLIC, color=THEMES[theme_mode]['global_icon']),
+                    ft.Text(L['prompt_global'], size=16, weight=ft.FontWeight.BOLD),
                 ], spacing=5),
                 global_prompt_content,
-                ft.Row([ft.ElevatedButton("保存全局提示词", icon=ft.Icons.SAVE, on_click=save_global_prompt)]),
+                ft.Row([ft.ElevatedButton(L['prompt_save_global'], icon=ft.Icons.SAVE, on_click=save_global_prompt)]),
             ], spacing=5),
             padding=10,
-            border=ft.border.all(1, ft.Colors.PURPLE_200),
+            border=ft.border.all(1, THEMES[theme_mode]['global_border']),
             border_radius=8,
-            bgcolor=ft.Colors.PURPLE_50,
+            bgcolor=THEMES[theme_mode]['global_bg'],
         ),
         ft.Divider(),
         # 用户提示词区域
         ft.Row([
-            ft.Text("用户提示词", size=16, weight=ft.FontWeight.BOLD),
+            ft.Text(L['prompt_user'], size=16, weight=ft.FontWeight.BOLD),
             ft.IconButton(ft.Icons.ADD, on_click=add_prompt, tooltip=L['add']),
             ft.IconButton(ft.Icons.EDIT, on_click=edit_prompt, tooltip=L['edit']),
             ft.IconButton(ft.Icons.DELETE, on_click=delete_prompt, tooltip=L['delete']),
@@ -2216,7 +2497,7 @@ def main(page: ft.Page):
                 ], spacing=5),
                 padding=ft.padding.only(left=5, top=8, bottom=8),
                 on_click=lambda e, c=cat: toggle_mcp_category(c),
-                bgcolor=ft.Colors.GREY_100,
+                bgcolor=THEMES[theme_mode]['header_bg'],
                 border_radius=4,
             )
             mcp_tree.controls.append(cat_header)
@@ -2229,7 +2510,7 @@ def main(page: ft.Page):
                     item = ft.Container(
                         content=ft.Row([
                             ft.Checkbox(value=is_default, on_change=lambda e, idx=i: toggle_mcp_default(idx, e.control.value),
-                                       tooltip="设为默认（始终加载）"),
+                                       tooltip=L['mcp_set_default_hint']),
                             ft.Icon(ft.Icons.STAR if is_default else ft.Icons.EXTENSION, size=16,
                                    color=ft.Colors.ORANGE if is_default else (ft.Colors.BLUE if is_selected else ft.Colors.GREY_600)),
                             ft.Column([
@@ -2298,13 +2579,13 @@ def main(page: ft.Page):
             save_mcp(mcp_list)
             refresh_mcp_tree()
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text(f"已添加 {server['name']}")))
+            page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(1))))
             page.update()
 
         dlg = ft.AlertDialog(
-            title=ft.Text("选择官方 MCP 服务器"),
+            title=ft.Text(L['mcp_select_official']),
             content=ft.Container(official_list, width=450, height=400),
-            actions=[ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update())],
+            actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update())],
         )
         page.overlay.append(dlg)
         dlg.open = True
@@ -2316,8 +2597,8 @@ def main(page: ft.Page):
 
         name_field = ft.TextField(label=L['name'], value=m.get('name', ''), expand=True)
         category_field = ft.Dropdown(
-            label='分类',
-            value=m.get('category', '其他'),
+            label=L['mcp_category'],
+            value=m.get('category', L['mcp_other']),
             options=[ft.dropdown.Option(c) for c in MCP_CATEGORIES],
             expand=True,
         )
@@ -2371,7 +2652,7 @@ def main(page: ft.Page):
             market_list.controls.append(tile)
 
         dlg = ft.AlertDialog(
-            title=ft.Text("MCP 市场"),
+            title=ft.Text(L['mcp_market']),
             content=ft.Container(market_list, width=400, height=250),
             actions=[ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update())],
         )
@@ -2404,7 +2685,7 @@ def main(page: ft.Page):
             try:
                 clip = await page.get_clipboard_async()
                 if not clip:
-                    page.open(ft.SnackBar(ft.Text("剪贴板为空")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_clipboard_empty'])))
                     page.update()
                     return
                 data = json.loads(clip)
@@ -2413,13 +2694,13 @@ def main(page: ft.Page):
                     mcp_list.extend(items)
                     save_mcp(mcp_list)
                     refresh_mcp_tree()
-                    page.open(ft.SnackBar(ft.Text(f"已导入 {len(items)} 个 MCP")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
                 else:
-                    page.open(ft.SnackBar(ft.Text("未找到有效配置")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
             except json.JSONDecodeError:
-                page.open(ft.SnackBar(ft.Text("剪贴板内容不是有效的 JSON")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_invalid_json'])))
             except Exception as ex:
-                page.open(ft.SnackBar(ft.Text(f"导入失败: {ex}")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
             page.update()
         page.run_task(do_import)
 
@@ -2436,21 +2717,21 @@ def main(page: ft.Page):
                     mcp_list.extend(items)
                     save_mcp(mcp_list)
                     refresh_mcp_tree()
-                    page.open(ft.SnackBar(ft.Text(f"已导入 {len(items)} 个 MCP")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
                 else:
-                    page.open(ft.SnackBar(ft.Text("未找到有效配置")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
             except Exception as ex:
-                page.open(ft.SnackBar(ft.Text(f"导入失败: {ex}")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
             page.update()
         picker = ft.FilePicker(on_result=on_result)
         page.overlay.append(picker)
         page.update()
-        picker.pick_files(allowed_extensions=['json'], dialog_title="选择 MCP 配置文件")
+        picker.pick_files(allowed_extensions=['json'], dialog_title=L['mcp_import_file'])
 
     def import_from_text(e):
         """从文本输入导入 MCP"""
         text_field = ft.TextField(
-            label="粘贴 JSON 配置",
+            label=L['mcp_import_text_desc'],
             multiline=True,
             min_lines=10,
             max_lines=15,
@@ -2466,27 +2747,27 @@ def main(page: ft.Page):
                     save_mcp(mcp_list)
                     refresh_mcp_tree()
                     dlg.open = False
-                    page.open(ft.SnackBar(ft.Text(f"已导入 {len(items)} 个 MCP")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
                 else:
-                    page.open(ft.SnackBar(ft.Text("未找到有效配置")))
+                    page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
             except json.JSONDecodeError:
-                page.open(ft.SnackBar(ft.Text("JSON 格式错误")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_invalid_json'])))
             except Exception as ex:
-                page.open(ft.SnackBar(ft.Text(f"导入失败: {ex}")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
             page.update()
 
         dlg = ft.AlertDialog(
-            title=ft.Text("从文本导入 MCP"),
+            title=ft.Text(L['mcp_import_text']),
             content=ft.Container(
                 ft.Column([
-                    ft.Text("支持格式：{\"mcpServers\": {...}} 或 {\"name\": {...}}", size=12, color=ft.Colors.GREY_600),
+                    ft.Text(L['mcp_import_format'], size=12, color=ft.Colors.GREY_600),
                     text_field,
                 ], tight=True),
                 width=500, height=350,
             ),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
-                ft.ElevatedButton("导入", on_click=do_import),
+                ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+                ft.ElevatedButton(L['import'], on_click=do_import),
             ],
         )
         page.overlay.append(dlg)
@@ -2496,28 +2777,28 @@ def main(page: ft.Page):
     def show_import_menu(e):
         """显示导入菜单"""
         dlg = ft.AlertDialog(
-            title=ft.Text("导入 MCP"),
+            title=ft.Text(L['mcp_import_title']),
             content=ft.Column([
                 ft.ListTile(
                     leading=ft.Icon(ft.Icons.CONTENT_PASTE, color=ft.Colors.BLUE),
-                    title=ft.Text("从剪贴板导入"),
-                    subtitle=ft.Text("直接粘贴 JSON 配置"),
+                    title=ft.Text(L['mcp_import_clipboard']),
+                    subtitle=ft.Text(L['mcp_import_clipboard_desc']),
                     on_click=lambda e: (setattr(dlg, 'open', False), page.update(), import_from_clipboard(e)),
                 ),
                 ft.ListTile(
                     leading=ft.Icon(ft.Icons.FILE_OPEN, color=ft.Colors.GREEN),
-                    title=ft.Text("从文件导入"),
-                    subtitle=ft.Text("选择 .mcp.json 或其他 JSON 文件"),
+                    title=ft.Text(L['mcp_import_file']),
+                    subtitle=ft.Text(L['mcp_import_file_desc']),
                     on_click=lambda e: (setattr(dlg, 'open', False), page.update(), import_from_file(e)),
                 ),
                 ft.ListTile(
                     leading=ft.Icon(ft.Icons.TEXT_FIELDS, color=ft.Colors.ORANGE),
-                    title=ft.Text("从文本导入"),
-                    subtitle=ft.Text("手动粘贴 JSON 文本"),
+                    title=ft.Text(L['mcp_import_text']),
+                    subtitle=ft.Text(L['mcp_import_text_desc']),
                     on_click=lambda e: (setattr(dlg, 'open', False), page.update(), import_from_text(e)),
                 ),
             ], tight=True, spacing=0),
-            actions=[ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update())],
+            actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update())],
         )
         page.overlay.append(dlg)
         dlg.open = True
@@ -2539,15 +2820,15 @@ def main(page: ft.Page):
 
     def sync_mcp_repository(e):
         """同步 MCP 仓库（从多个源获取）"""
-        status_text = ft.Text("准备同步...")
+        status_text = ft.Text(L['mcp_sync_preparing'])
         progress = ft.ProgressBar(width=400)
 
         loading_dlg = ft.AlertDialog(
-            title=ft.Text("同步 MCP 仓库"),
+            title=ft.Text(L['mcp_sync_title']),
             content=ft.Column([
                 progress,
                 status_text,
-                ft.Text("从 PulseMCP、Smithery、GitHub 等源获取...", size=12, color=ft.Colors.GREY_600),
+                ft.Text(L['mcp_sync_sources'], size=12, color=ft.Colors.GREY_600),
             ], tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             modal=True,
         )
@@ -2574,7 +2855,7 @@ def main(page: ft.Page):
 
             # 显示结果
             if stats['total'] > 0:
-                page.open(ft.SnackBar(ft.Text(f"同步完成：共 {stats['total']} 个 MCP，新增 {new_count} 个")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_sync_complete'].format(stats['total'], new_count))))
                 show_repository_browser(stats)
             else:
                 show_sync_debug()
@@ -2586,12 +2867,12 @@ def main(page: ft.Page):
         """显示同步调试信息"""
         log_text = "\n".join(mcp_fetch_log)
         dlg = ft.AlertDialog(
-            title=ft.Text("同步失败 - 调试信息", color=ft.Colors.RED),
+            title=ft.Text(L['mcp_sync_fail'], color=ft.Colors.RED),
             content=ft.Container(
                 ft.TextField(value=log_text, multiline=True, read_only=True, min_lines=15, max_lines=20, expand=True),
                 width=600, height=400,
             ),
-            actions=[ft.TextButton("关闭", on_click=lambda e: setattr(dlg, 'open', False) or page.update())],
+            actions=[ft.TextButton(L['close'], on_click=lambda _: setattr(dlg, 'open', False) or page.update())],
         )
         page.overlay.append(dlg)
         dlg.open = True
@@ -2599,21 +2880,34 @@ def main(page: ft.Page):
 
     def show_repository_browser(stats: dict):
         """显示 MCP 仓库浏览器（使用 SQLite FTS5 搜索）"""
-        search_field = ft.TextField(label="搜索", prefix_icon=ft.Icons.SEARCH, expand=True)
+        # 分类映射：数据库中文名 -> 翻译键
+        cat_keys = ['cloud', 'map', 'media', 'security', 'tool', 'dev', 'search', 'db',
+                    'file', 'news', 'calendar', 'model', 'browser', 'game', 'ecommerce', 'knowledge',
+                    'social', 'note', 'network', 'design', 'comm', 'finance', 'project', 'other']
+        cat_zh = ['云服务', '地图', '媒体', '安全', '工具', '开发', '搜索', '数据库',
+                  '文件', '新闻', '日历', '模型', '浏览器', '游戏', '电商', '知识库',
+                  '社交', '笔记', '网络', '设计', '通讯', '金融', '项目', '其他']
+        cat_display = [L[f'mcp_cat_{k}'] for k in cat_keys]
+        zh_to_display = dict(zip(cat_zh, cat_display))
+        display_to_zh = dict(zip(cat_display, cat_zh))
+
+        search_field = ft.TextField(label=L['mcp_search'], prefix_icon=ft.Icons.SEARCH, expand=True)
         category_dropdown = ft.Dropdown(
-            label="分类",
-            value="全部",
-            options=[ft.dropdown.Option("全部")] + [ft.dropdown.Option(c) for c in ['文件', '网络', '数据', 'AI', '开发', '工具', '其他']],
+            label=L['mcp_category'],
+            value=L['mcp_all'],
+            options=[ft.dropdown.Option(L['mcp_all'])] + [ft.dropdown.Option(c) for c in cat_display],
             width=120,
         )
         result_list = ft.ListView(expand=True, spacing=2)
         selected_items = set()
-        selected_count_text = ft.Text("已选: 0", color=ft.Colors.GREY_600)
+        selected_count_text = ft.Text(L['mcp_selected'].format(0), color=ft.Colors.GREY_600)
 
         def filter_list(e=None):
             result_list.controls.clear()
             keyword = search_field.value or ''
-            cat_filter = category_dropdown.value or '全部'
+            cat_val = category_dropdown.value or L['mcp_all']
+            # 转换显示名称为数据库中文名
+            cat_filter = display_to_zh.get(cat_val, '全部') if cat_val != L['mcp_all'] else '全部'
 
             # 使用 SQLite FTS5 搜索
             servers = mcp_registry.search(keyword, cat_filter, limit=200)
@@ -2622,6 +2916,7 @@ def main(page: ft.Page):
                 name = item.get('name', '')
                 desc = item.get('description', '') or ''
                 cat = item.get('category', '其他')
+                cat_disp = zh_to_display.get(cat, cat)  # 显示翻译后的分类
                 source = item.get('source', '')
                 is_selected = name in selected_items
 
@@ -2632,7 +2927,7 @@ def main(page: ft.Page):
                             ft.Row([
                                 ft.Text(name, weight=ft.FontWeight.BOLD if is_selected else None, expand=True),
                                 ft.Container(
-                                    ft.Text(cat, size=10, color=ft.Colors.WHITE),
+                                    ft.Text(cat_disp, size=10, color=ft.Colors.WHITE),
                                     bgcolor=ft.Colors.BLUE_400, padding=ft.padding.symmetric(2, 6), border_radius=8,
                                 ),
                                 ft.Text(source, size=9, color=ft.Colors.GREY_400),
@@ -2647,7 +2942,7 @@ def main(page: ft.Page):
                 result_list.controls.append(tile)
 
             if len(servers) >= 200:
-                result_list.controls.append(ft.Text("... 还有更多，请使用搜索缩小范围", color=ft.Colors.GREY_500, italic=True))
+                result_list.controls.append(ft.Text(L['mcp_more_hint'], color=ft.Colors.GREY_500, italic=True))
             page.update()
 
         def toggle_select(name, checked):
@@ -2655,7 +2950,7 @@ def main(page: ft.Page):
                 selected_items.add(name)
             else:
                 selected_items.discard(name)
-            selected_count_text.value = f"已选: {len(selected_items)}"
+            selected_count_text.value = L['mcp_selected'].format(len(selected_items))
             filter_list()
 
         def add_selected(e):
@@ -2679,7 +2974,7 @@ def main(page: ft.Page):
                 save_mcp(mcp_list)
                 refresh_mcp_tree()
                 dlg.open = False
-                page.open(ft.SnackBar(ft.Text(f"已添加 {added} 个 MCP")))
+                page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(added))))
             page.update()
 
         # 绑定事件
@@ -2690,13 +2985,13 @@ def main(page: ft.Page):
         filter_list()
 
         # 更新时间显示
-        updated = stats.get('updated_at', '未知')[:16].replace('T', ' ') if stats.get('updated_at') else '未同步'
+        updated = stats.get('updated_at', '')[:16].replace('T', ' ') if stats.get('updated_at') else L['mcp_not_synced']
 
         dlg = ft.AlertDialog(
             title=ft.Row([
-                ft.Text(f"MCP 仓库 ({stats['total']} 个)", weight=ft.FontWeight.BOLD),
-                ft.Text(f"更新: {updated}", size=11, color=ft.Colors.GREY_500),
-                ft.IconButton(ft.Icons.REFRESH, on_click=lambda e: (setattr(dlg, 'open', False), page.update(), sync_mcp_repository(e)), tooltip="重新同步"),
+                ft.Text(L['mcp_repo_title'].format(stats['total']), weight=ft.FontWeight.BOLD),
+                ft.Text(L['mcp_updated'].format(updated), size=11, color=ft.Colors.GREY_500),
+                ft.IconButton(ft.Icons.REFRESH, on_click=lambda e: (setattr(dlg, 'open', False), page.update(), sync_mcp_repository(e)), tooltip=L['mcp_resync']),
             ], spacing=10),
             content=ft.Container(
                 ft.Column([
@@ -2708,7 +3003,7 @@ def main(page: ft.Page):
             actions=[
                 selected_count_text,
                 ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
-                ft.ElevatedButton("添加选中", on_click=add_selected),
+                ft.ElevatedButton(L['mcp_add_selected'], on_click=add_selected),
             ],
         )
         page.overlay.append(dlg)
@@ -2730,14 +3025,14 @@ def main(page: ft.Page):
         ft.Row([
             ft.Text(L['mcp'], size=20, weight=ft.FontWeight.BOLD),
             ft.IconButton(ft.Icons.ADD, on_click=add_mcp, tooltip=L['add']),
-            ft.IconButton(ft.Icons.DOWNLOAD, on_click=show_import_menu, tooltip="导入"),
-            ft.IconButton(ft.Icons.CLOUD_SYNC, on_click=show_mcp_repository, tooltip="MCP 仓库"),
-            ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=add_from_official, tooltip="官方推荐"),
-            ft.IconButton(ft.Icons.STORE, on_click=browse_mcp_market, tooltip="MCP市场"),
+            ft.IconButton(ft.Icons.DOWNLOAD, on_click=show_import_menu, tooltip=L['mcp_import']),
+            ft.IconButton(ft.Icons.CLOUD_SYNC, on_click=show_mcp_repository, tooltip=L['mcp_browse']),
+            ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=add_from_official, tooltip=L['mcp_official']),
+            ft.IconButton(ft.Icons.STORE, on_click=browse_mcp_market, tooltip=L['mcp_market']),
             ft.IconButton(ft.Icons.EDIT, on_click=edit_mcp, tooltip=L['edit']),
             ft.IconButton(ft.Icons.DELETE, on_click=delete_mcp, tooltip=L['delete']),
         ]),
-        ft.Text("勾选设为默认 MCP（始终加载到全局和工作目录）", size=12, color=ft.Colors.GREY_600),
+        ft.Text(L['mcp_default_hint'], size=12, color=ft.Colors.GREY_600),
         ft.Container(mcp_tree, expand=True, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8),
     ], expand=True, spacing=10)
 
@@ -2799,7 +3094,7 @@ def main(page: ft.Page):
         # 加载数据（使用缓存）
         history_data = get_history_data()
         if not history_data:
-            history_stats.value = "无历史记录"
+            history_stats.value = L['history_no_records']
             history_progress.visible = False
             if current_page_idx != 3: return
             page.update()
@@ -2941,12 +3236,12 @@ def main(page: ft.Page):
                 grp_sessions_data = [{'group': grp_name, 'session_id': sid, 'info': info} for sid, info in sessions.items()]
                 history_tree.controls.append(ft.ExpansionTile(
                     title=ft.Text(grp_name[:40], size=14, weight=ft.FontWeight.W_500),
-                    subtitle=ft.Text(f"{len(grp_items)} 个会话 | {grp_size_str}", size=11),
+                    subtitle=ft.Text(f"{len(grp_items)} {L['history_sessions']} | {grp_size_str}", size=11),
                     controls=[ft.Column(grp_items, horizontal_alignment=ft.CrossAxisAlignment.START)],
                     initially_expanded=len(history_data) <= 3,
                     trailing=ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE, icon_size=18,
-                        tooltip="删除此项目所有会话",
+                        tooltip=L['history_delete_project'],
                         on_click=lambda _, data=grp_sessions_data: delete_sessions(data),
                     ),
                 ))
@@ -2981,14 +3276,14 @@ def main(page: ft.Page):
         if not data:
             return
         info, sid = data['info'], data['session_id']
-        history_detail.controls.append(ft.Text(f"会话: {sid}", size=14, weight=ft.FontWeight.BOLD))
-        history_detail.controls.append(ft.Text(f"路径: {info.get('cwd', '未知')}", size=12, color=ft.Colors.GREY_600))
+        history_detail.controls.append(ft.Text(L['history_session'].format(sid), size=14, weight=ft.FontWeight.BOLD))
+        history_detail.controls.append(ft.Text(L['history_path'].format(info.get('cwd', L['history_unknown'])), size=12, color=ft.Colors.GREY_600))
         resume_cmd = f"claude --resume {sid}" if current_cli == "claude" else f"codex --resume {sid}"
         history_detail.controls.append(ft.Row([
-            ft.TextButton("复制ID", on_click=lambda _: copy_to_clipboard(sid)),
-            ft.TextButton("复制resume", on_click=lambda _: copy_to_clipboard(resume_cmd)),
-            ft.TextButton("导出MD", on_click=lambda _: export_session(sid, info)),
-            ft.TextButton("打开位置", on_click=lambda _: open_file_location(info)),
+            ft.TextButton(L['history_copy_id'], on_click=lambda _: copy_to_clipboard(sid)),
+            ft.TextButton(L['history_copy_resume'], on_click=lambda _: copy_to_clipboard(resume_cmd)),
+            ft.TextButton(L['history_export_md'], on_click=lambda _: export_session(sid, info)),
+            ft.TextButton(L['history_open_location'], on_click=lambda _: open_file_location(info)),
         ], spacing=5))
         history_detail.controls.append(ft.Divider())
 
@@ -2998,7 +3293,7 @@ def main(page: ft.Page):
 
         def render_message(msg):
             if current_cli == "claude":
-                role = msg.get('message', {}).get('role', '未知')
+                role = msg.get('message', {}).get('role', L['history_unknown'])
                 ts = msg.get('timestamp', '')
                 content = msg.get('message', {}).get('content', [])
                 text = ""
@@ -3009,13 +3304,13 @@ def main(page: ft.Page):
                             if t == 'text':
                                 text += c.get('text', '')
                             elif t == 'tool_use':
-                                text += f"[工具: {c.get('name', '')}] "
+                                text += L['history_tool'].format(c.get('name', ''))
                             elif t == 'tool_result':
-                                text += f"[工具结果] "
+                                text += L['history_tool_result']
                 elif isinstance(content, str):
                     text = content
             else:  # codex
-                role = msg.get('role', '未知')
+                role = msg.get('role', L['history_unknown'])
                 ts = ""
                 content = msg.get('content', '')
                 if isinstance(content, list):
@@ -3026,7 +3321,7 @@ def main(page: ft.Page):
                 else:
                     text = str(content)
             if not text.strip():
-                text = "(无文本内容)"
+                text = L['history_no_content']
             color = ft.Colors.with_opacity(0.15, ft.Colors.BLUE) if role == 'user' else ft.Colors.with_opacity(0.15, ft.Colors.GREEN)
             return ft.GestureDetector(
                 content=ft.Container(
@@ -3077,8 +3372,8 @@ def main(page: ft.Page):
                 ft.TextField(value=text, multiline=True, read_only=True, min_lines=10, max_lines=20),
             ], width=600, scroll=ft.ScrollMode.AUTO),
             actions=[
-                ft.TextButton("复制", on_click=lambda _: copy_to_clipboard(text)),
-                ft.TextButton("关闭", on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
+                ft.TextButton(L['copy'], on_click=lambda _: copy_to_clipboard(text)),
+                ft.TextButton(L['close'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
             ],
         )
         page.overlay.append(dlg)
@@ -3087,7 +3382,7 @@ def main(page: ft.Page):
 
     def copy_to_clipboard(text):
         page.set_clipboard(text)
-        page.open(ft.SnackBar(ft.Text(f"已复制: {text[:50]}...")))
+        page.open(ft.SnackBar(ft.Text(L['history_copied'].format(text[:50]))))
         page.update()
 
     def open_file_location(info):
@@ -3109,7 +3404,7 @@ def main(page: ft.Page):
         md = mgr.export_to_markdown(sid, info)
         export_path = Path.home() / "Downloads" / f"{current_cli}_{sid[:12]}.md"
         export_path.write_text(md, encoding='utf-8')
-        page.open(ft.SnackBar(ft.Text(f"已导出: {export_path}")))
+        page.open(ft.SnackBar(ft.Text(L['history_exported'].format(export_path))))
         page.update()
 
     def delete_sessions(sessions_data):
@@ -3180,34 +3475,34 @@ def main(page: ft.Page):
                 history_cache[current_cli] = {}
                 refresh_history_tree()
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text(f"已恢复 {count} 个会话")))
+            page.open(ft.SnackBar(ft.Text(L['history_restored'].format(count))))
             page.update()
 
         def delete_selected(_):
             for item in selected_trash.values():
                 mgr.trash_manager.permanently_delete(item)
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text(f"已永久删除 {len(selected_trash)} 个会话")))
+            page.open(ft.SnackBar(ft.Text(L['history_perm_deleted'].format(len(selected_trash)))))
             page.update()
 
         def clear_all(_):
             for item in items:
                 mgr.trash_manager.permanently_delete(item)
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text("回收站已清空")))
+            page.open(ft.SnackBar(ft.Text(L['history_trash_cleared'])))
             page.update()
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['history_trash']),
             content=ft.Column([
                 ft.Text(L['history_trash_info'].format(TRASH_RETENTION_DAYS), size=12),
-                ft.Text("点击选中，支持多选", size=11, color=ft.Colors.GREY_500),
+                ft.Text(L['history_click_hint'], size=11, color=ft.Colors.GREY_500),
                 trash_list
             ], width=450),
             actions=[
-                ft.TextButton("恢复选中", on_click=restore_selected),
-                ft.TextButton("永久删除选中", on_click=delete_selected),
-                ft.TextButton("清空回收站", on_click=clear_all),
+                ft.TextButton(L['history_restore'], on_click=restore_selected),
+                ft.TextButton(L['history_perm_delete'], on_click=delete_selected),
+                ft.TextButton(L['history_clear_trash'], on_click=clear_all),
                 ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update())
             ],
         )
@@ -3265,9 +3560,9 @@ def main(page: ft.Page):
                     if d.is_dir() and not any(f.suffix == '.jsonl' for f in d.iterdir() if f.is_file()):
                         empty_dirs.append(d)
 
-        chk_short = ft.Checkbox(label=f"短会话（≤3条且≤150字）: {len(short_sessions)}个", value=True)
-        chk_old = ft.Checkbox(label=f"30天前会话: {len(old_sessions)}个", value=False)
-        chk_empty = ft.Checkbox(label=f"空项目目录: {len(empty_dirs)}个", value=False)
+        chk_short = ft.Checkbox(label=L['history_short_label'].format(len(short_sessions)), value=True)
+        chk_old = ft.Checkbox(label=L['history_old_label'].format(len(old_sessions)), value=False)
+        chk_empty = ft.Checkbox(label=L['history_empty_label'].format(len(empty_dirs)), value=False)
 
         # 预览列表
         preview_list = ft.Column([], scroll=ft.ScrollMode.AUTO, height=200)
@@ -3275,23 +3570,23 @@ def main(page: ft.Page):
         def update_preview(_=None):
             preview_list.controls.clear()
             if chk_short.value and short_sessions:
-                preview_list.controls.append(ft.Text("短会话:", weight=ft.FontWeight.BOLD, size=12))
+                preview_list.controls.append(ft.Text(L['history_short_sessions'], weight=ft.FontWeight.BOLD, size=12))
                 for s in short_sessions[:10]:
-                    preview_list.controls.append(ft.Text(f"  {s['session_id'][:12]}... ({s['info']['message_count']}条, {s['chars']}字)", size=11, color=ft.Colors.GREY_600))
+                    preview_list.controls.append(ft.Text(f"  {s['session_id'][:12]}... ({s['info']['message_count']}msgs, {s['chars']}chars)", size=11, color=ft.Colors.GREY_600))
                 if len(short_sessions) > 10:
-                    preview_list.controls.append(ft.Text(f"  ...还有 {len(short_sessions)-10} 个", size=11, color=ft.Colors.GREY_500))
+                    preview_list.controls.append(ft.Text(f"  ...+{len(short_sessions)-10}", size=11, color=ft.Colors.GREY_500))
             if chk_old.value and old_sessions:
-                preview_list.controls.append(ft.Text("30天前会话:", weight=ft.FontWeight.BOLD, size=12))
+                preview_list.controls.append(ft.Text(L['history_old'], weight=ft.FontWeight.BOLD, size=12))
                 for s in old_sessions[:10]:
                     preview_list.controls.append(ft.Text(f"  {s['session_id'][:12]}...", size=11, color=ft.Colors.GREY_600))
                 if len(old_sessions) > 10:
-                    preview_list.controls.append(ft.Text(f"  ...还有 {len(old_sessions)-10} 个", size=11, color=ft.Colors.GREY_500))
+                    preview_list.controls.append(ft.Text(f"  ...+{len(old_sessions)-10}", size=11, color=ft.Colors.GREY_500))
             if chk_empty.value and empty_dirs:
-                preview_list.controls.append(ft.Text("空目录:", weight=ft.FontWeight.BOLD, size=12))
+                preview_list.controls.append(ft.Text(L['history_empty_dirs'], weight=ft.FontWeight.BOLD, size=12))
                 for d in empty_dirs[:5]:
                     preview_list.controls.append(ft.Text(f"  {d.name}", size=11, color=ft.Colors.GREY_600))
                 if len(empty_dirs) > 5:
-                    preview_list.controls.append(ft.Text(f"  ...还有 {len(empty_dirs)-5} 个", size=11, color=ft.Colors.GREY_500))
+                    preview_list.controls.append(ft.Text(f"  ...+{len(empty_dirs)-5}", size=11, color=ft.Colors.GREY_500))
             page.update()
 
         chk_short.on_change = update_preview
@@ -3321,20 +3616,20 @@ def main(page: ft.Page):
                         pass
             history_cache[current_cli] = {}
             dlg.open = False
-            page.open(ft.SnackBar(ft.Text(f"已清理 {count} 个会话, {dir_count} 个空目录")))
+            page.open(ft.SnackBar(ft.Text(L['history_cleanup_done'].format(count, dir_count))))
             refresh_history_tree()
 
         dlg = ft.AlertDialog(
-            title=ft.Text("清理会话"),
+            title=ft.Text(L['history_cleanup']),
             content=ft.Column([
                 chk_short, chk_old, chk_empty,
                 ft.Divider(),
-                ft.Text("预览:", size=12, weight=ft.FontWeight.BOLD),
+                ft.Text(L['history_cleanup_preview'], size=12, weight=ft.FontWeight.BOLD),
                 preview_list,
-                ft.Text("清理后会话将移至回收站", size=11, color=ft.Colors.GREY_600),
+                ft.Text(L['history_cleanup_hint'], size=11, color=ft.Colors.GREY_600),
             ], width=400, spacing=5),
             actions=[
-                ft.TextButton("执行清理", on_click=do_cleanup),
+                ft.TextButton(L['history_cleanup_execute'], on_click=do_cleanup),
                 ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or page.update()),
             ],
         )
@@ -3344,14 +3639,14 @@ def main(page: ft.Page):
 
     # 批量操作按钮
     batch_delete_btn = ft.TextButton(
-        "删除选中", visible=False,
+        L['history_delete_selected'], visible=False,
         on_click=lambda e: delete_sessions(list(selected_sessions.values()))
     )
     batch_count_text = ft.Text("", size=12)
 
     def update_selection_buttons():
         batch_delete_btn.visible = len(selected_sessions) > 0
-        batch_count_text.value = f"已选 {len(selected_sessions)} 项" if selected_sessions else ""
+        batch_count_text.value = L['history_selected_count'].format(len(selected_sessions)) if selected_sessions else ""
         page.update()
 
     cli_dropdown = ft.Dropdown(
@@ -3507,8 +3802,8 @@ def main(page: ft.Page):
         on_change=switch_page,
         trailing=ft.Container(
             content=ft.Column([
-                ft.IconButton(ft.Icons.DARK_MODE if theme_mode == 'light' else ft.Icons.LIGHT_MODE, on_click=toggle_theme, tooltip="切换主题"),
-                ft.TextButton("中/EN", icon=ft.Icons.LANGUAGE, on_click=switch_lang),
+                ft.IconButton(ft.Icons.DARK_MODE if theme_mode == 'light' else ft.Icons.LIGHT_MODE, on_click=toggle_theme, tooltip=L['toggle_theme']),
+                ft.TextButton(L['switch_lang'], icon=ft.Icons.LANGUAGE, on_click=switch_lang),
                 ft.TextButton(L['feedback'], on_click=open_feedback),
             ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.padding.only(bottom=20),

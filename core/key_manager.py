@@ -204,8 +204,9 @@ class KeyManager:
         key_name: str,
         api_key: str,
         model: str = None,
-        token_limit_per_request: int = 4000,
-        token_limit_total: int = 100000,
+        max_tokens: int = 32000,
+        token_limit_per_request: int = 200000,
+        thinking_mode: str = None,
     ) -> Optional[str]:
         """添加新配置"""
         import time
@@ -219,15 +220,17 @@ class KeyManager:
                 "endpoint": endpoint,
                 "key_name": key_name,
                 "credentials": {"api_key": api_key},
+                "max_tokens": max_tokens,
                 "token_limit_per_request": token_limit_per_request,
-                "token_limit_total": token_limit_total
+                "selected_model": model,
+                "available_models": [model] if model else []
             },
             "createdAt": __import__("datetime").datetime.now().isoformat(),
             "updatedAt": __import__("datetime").datetime.now().isoformat(),
             "order": len(self.configs)
         }
-        if model:
-            config["provider"]["model"] = model
+        if thinking_mode:
+            config["provider"]["thinking_mode"] = thinking_mode
 
         self.configs.append(config)
         self.save_configs()
@@ -275,14 +278,47 @@ class KeyManager:
         return None
 
     def get_model(self, config_id: Optional[str] = None) -> Optional[str]:
-        """获取模型名称"""
+        """获取当前选中的模型名称"""
         config = (
             self.get_config_by_id(config_id)
             if config_id
             else self.get_current_config()
         )
         if config:
-            return config.get("provider", {}).get("model")
+            return config.get("provider", {}).get("selected_model")
+        return None
+
+    def get_max_tokens(self, config_id: Optional[str] = None) -> int:
+        """获取单次响应最大tokens限制（输出token上限）"""
+        config = (
+            self.get_config_by_id(config_id)
+            if config_id
+            else self.get_current_config()
+        )
+        if config:
+            return config.get("provider", {}).get("max_tokens", 32000)
+        return 32000
+
+    def get_models(self, config_id: Optional[str] = None) -> list:
+        """获取所有可用模型列表"""
+        config = (
+            self.get_config_by_id(config_id)
+            if config_id
+            else self.get_current_config()
+        )
+        if config:
+            return config.get("provider", {}).get("available_models", [])
+        return []
+
+    def get_thinking_mode(self, config_id: Optional[str] = None) -> Optional[str]:
+        """获取GLM思考模式"""
+        config = (
+            self.get_config_by_id(config_id)
+            if config_id
+            else self.get_current_config()
+        )
+        if config:
+            return config.get("provider", {}).get("thinking_mode")
         return None
 
     def get_token_limit_per_request(self, config_id: Optional[str] = None) -> int:

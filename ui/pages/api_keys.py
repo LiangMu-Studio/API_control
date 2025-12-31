@@ -13,6 +13,64 @@ from ..common import (
     detect_terminals, detect_python_envs, write_prompt_to_cli, detect_prompt_from_file
 )
 
+# 辅助函数：从配置获取 cli_type（兼容新旧格式）
+def get_cli_type(cfg):
+    """从配置获取 cli_type，用于树形结构分组"""
+    return cfg.get('cli_type', 'claude')
+
+# 提供商默认配置 - 完全复刻自 AI_talk
+PROVIDER_DEFAULTS = {
+    'openai': {
+        'endpoint': 'https://api.openai.com/v1',
+        'key_name': 'OPENAI_API_KEY',
+        'available_models': ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
+        'default_model': 'gpt-4o'
+    },
+    'anthropic': {
+        'endpoint': 'https://api.anthropic.com',
+        'key_name': 'ANTHROPIC_AUTH_TOKEN',
+        'available_models': ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929', 'claude-opus-4-5-20251101'],
+        'default_model': 'claude-haiku-4-5-20251001'
+    },
+    'gemini': {
+        'endpoint': 'https://generativelanguage.googleapis.com/v1beta',
+        'key_name': 'x-goog-api-key',
+        'available_models': [
+            {'name': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro'},
+            {'name': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
+            {'name': 'gemini-2.5-flash-lite', 'label': 'Gemini 2.5 Flash-Lite'},
+            {'name': 'gemini-3-pro-preview', 'label': 'Gemini 3 Pro Preview'},
+            {'name': 'gemini-2.5-pro-preview-06-05', 'label': 'Gemini 2.5 Pro Preview'}
+        ],
+        'default_model': 'gemini-2.5-pro'
+    },
+    'deepseek': {
+        'endpoint': 'https://api.deepseek.com/v1',
+        'key_name': 'DEEPSEEK_API_KEY',
+        'available_models': ['DeepSeek-V3.2', 'DeepSeek-V3', 'DeepSeek-R1'],
+        'default_model': 'DeepSeek-V3.2'
+    },
+    'glm': {
+        'endpoint': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+        'key_name': 'ZHIPU_API_KEY',
+        'available_models': [
+            {'name': 'glm-4.6', 'label': 'glm-4.6 (快速模式)', 'mode': 'fast'},
+            {'name': 'glm-4.6', 'label': 'glm-4.6 (均衡模式)', 'mode': 'balanced'},
+            {'name': 'glm-4.6', 'label': 'glm-4.6 (深度思考模式)', 'mode': 'deep'},
+            {'name': 'glm-4.6', 'label': 'glm-4.6 (创意模式)', 'mode': 'creative'},
+            {'name': 'glm-4.6', 'label': 'glm-4.6 (精确模式)', 'mode': 'precise'},
+            {'name': 'cogview-3', 'label': 'GLM 绘画 (CogView-3)', 'mode': 'image'}
+        ],
+        'default_model': 'glm-4.6'
+    },
+    'custom': {
+        'endpoint': '',
+        'key_name': 'API_KEY',
+        'available_models': [],
+        'default_model': None
+    }
+}
+
 
 def create_api_page(state):
     """创建 API 密钥页面"""
@@ -140,44 +198,119 @@ def create_api_page(state):
     def show_config_dialog(idx):
         is_edit = idx is not None
         cfg = state.configs[idx] if is_edit else {}
+        provider_data = cfg.get('provider', {})
 
         name_field = ft.TextField(label=L['name'], value=cfg.get('label', ''), expand=True)
-        cli_dropdown = ft.Dropdown(
-            label=L['cli_type'], value=cfg.get('cli_type', 'claude'),
-            options=[ft.dropdown.Option(k, v['name']) for k, v in CLI_TOOLS.items()], expand=True,
-        )
-        endpoint_field = ft.TextField(
-            label=L['api_addr'], value=cfg.get('provider', {}).get('endpoint', CLI_TOOLS['claude']['default_endpoint']), expand=True,
-        )
-        key_name_field = ft.TextField(
-            label=L['key_name'], value=cfg.get('provider', {}).get('key_name', CLI_TOOLS['claude']['default_key_name']), expand=True,
-        )
-        api_key_field = ft.TextField(
-            label=L['api_key'], value=cfg.get('provider', {}).get('credentials', {}).get('api_key', ''),
-            password=True, can_reveal_password=True, expand=True,
+
+        # 提供商下拉
+        provider_dropdown = ft.Dropdown(
+            label=L.get('provider', '提供商'),
+            value=provider_data.get('type', 'anthropic'),
+            options=[ft.dropdown.Option(k, k.upper()) for k in PROVIDER_DEFAULTS.keys()],
+            expand=True,
         )
 
-        def on_cli_change(e):
-            cli = cli_dropdown.value
-            if cli in CLI_TOOLS:
-                endpoint_field.value = CLI_TOOLS[cli]['default_endpoint']
-                key_name_field.value = CLI_TOOLS[cli]['default_key_name']
-                page.update()
-        cli_dropdown.on_change = on_cli_change
+        # 模型下拉
+        model_dropdown = ft.Dropdown(label=L.get('model', '模型'), expand=True)
+
+        endpoint_field = ft.TextField(
+            label=L['api_addr'], value=provider_data.get('endpoint', PROVIDER_DEFAULTS['anthropic']['endpoint']), expand=True,
+        )
+        key_name_field = ft.TextField(
+            label=L['key_name'], value=provider_data.get('key_name', PROVIDER_DEFAULTS['anthropic']['key_name']), expand=True,
+        )
+        api_key_field = ft.TextField(
+            label=L['api_key'], value=provider_data.get('credentials', {}).get('api_key', ''),
+            password=True, can_reveal_password=True, expand=True,
+        )
+        max_tokens_field = ft.TextField(
+            label=L.get('max_tokens', '单次响应最大'), value=str(provider_data.get('max_tokens', 32000)), expand=True,
+        )
+        token_limit_field = ft.TextField(
+            label=L.get('token_limit', '上下文窗口'), value=str(provider_data.get('token_limit_per_request', 200000)), expand=True,
+        )
+
+        def build_model_options(provider):
+            defaults = PROVIDER_DEFAULTS.get(provider, {})
+            models = defaults.get('available_models', [])
+            options = []
+            for m in models:
+                if isinstance(m, dict):
+                    options.append(ft.dropdown.Option(key=m.get('name', ''), text=m.get('label', m.get('name', ''))))
+                else:
+                    options.append(ft.dropdown.Option(key=m, text=m))
+            return options
+
+        def on_provider_change(e):
+            provider = provider_dropdown.value
+            defaults = PROVIDER_DEFAULTS.get(provider, {})
+            endpoint_field.value = defaults.get('endpoint', '')
+            key_name_field.value = defaults.get('key_name', 'API_KEY')
+            model_dropdown.options = build_model_options(provider)
+            if defaults.get('default_model'):
+                model_dropdown.value = defaults['default_model']
+            else:
+                model_dropdown.value = None
+            page.update()
+
+        provider_dropdown.on_change = on_provider_change
+
+        # 初始化模型列表
+        init_provider = provider_data.get('type', 'anthropic')
+        model_dropdown.options = build_model_options(init_provider)
+        saved_model = provider_data.get('selected_model')
+        if saved_model:
+            model_dropdown.value = saved_model
+        elif PROVIDER_DEFAULTS.get(init_provider, {}).get('default_model'):
+            model_dropdown.value = PROVIDER_DEFAULTS[init_provider]['default_model']
 
         def save_config(e):
             if not name_field.value or not api_key_field.value:
                 page.open(ft.SnackBar(ft.Text(L['fill_required'])))
                 page.update()
                 return
+
+            provider_type = provider_dropdown.value
+            selected_model = model_dropdown.value
+
+            # 获取GLM的thinking_mode
+            thinking_mode = None
+            if provider_type == 'glm' and selected_model:
+                for opt in model_dropdown.options:
+                    if opt.key == selected_model:
+                        for mm in PROVIDER_DEFAULTS['glm']['available_models']:
+                            if isinstance(mm, dict) and mm.get('label') == opt.text:
+                                thinking_mode = mm.get('mode')
+                                break
+                        break
+
+            try:
+                max_tokens = int(max_tokens_field.value)
+                token_limit = int(token_limit_field.value)
+            except ValueError:
+                max_tokens = 32000
+                token_limit = 200000
+
             new_cfg = {
                 'id': cfg.get('id', f"{name_field.value}-{int(datetime.now().timestamp())}"),
-                'label': name_field.value, 'cli_type': cli_dropdown.value,
-                'provider': {'endpoint': endpoint_field.value, 'key_name': key_name_field.value,
-                            'credentials': {'api_key': api_key_field.value}},
+                'label': name_field.value,
+                'cli_type': 'claude',
+                'provider': {
+                    'type': provider_type,
+                    'endpoint': endpoint_field.value,
+                    'key_name': key_name_field.value,
+                    'credentials': {'api_key': api_key_field.value},
+                    'selected_model': selected_model,
+                    'available_models': [selected_model] if selected_model else [],
+                    'max_tokens': max_tokens,
+                    'token_limit_per_request': token_limit,
+                },
                 'createdAt': cfg.get('createdAt', datetime.now().isoformat()),
                 'updatedAt': datetime.now().isoformat(),
             }
+            if thinking_mode:
+                new_cfg['provider']['thinking_mode'] = thinking_mode
+
             if is_edit:
                 state.configs[idx] = new_cfg
             else:
@@ -190,7 +323,15 @@ def create_api_page(state):
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
-            content=ft.Column([name_field, cli_dropdown, endpoint_field, key_name_field, api_key_field], tight=True, spacing=10, width=400),
+            content=ft.Column([
+                name_field,
+                provider_dropdown,
+                model_dropdown,
+                endpoint_field,
+                key_name_field,
+                api_key_field,
+                ft.Row([max_tokens_field, token_limit_field]),
+            ], tight=True, spacing=10, width=500),
             actions=[
                 ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
                 ft.TextButton(L['save'], on_click=save_config),
@@ -240,7 +381,7 @@ def create_api_page(state):
     def move_up(e):
         if state.selected_config is not None:
             cli, ep = state.selected_endpoint.split(':', 1) if state.selected_endpoint else (None, None)
-            same_ep = [i for i, c in enumerate(state.configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+            same_ep = [i for i, c in enumerate(state.configs) if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep]
             pos = same_ep.index(state.selected_config) if state.selected_config in same_ep else -1
             if pos > 0:
                 prev_idx = same_ep[pos - 1]
@@ -250,24 +391,24 @@ def create_api_page(state):
                 refresh_config_list()
         elif state.selected_endpoint:
             cli, ep = state.selected_endpoint.split(':', 1)
-            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in state.configs if c.get('cli_type') == cli))
+            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in state.configs if get_cli_type(c) == cli))
             pos = eps.index(ep) if ep in eps else -1
             if pos > 0:
                 prev_ep = eps[pos - 1]
-                ep_items = [c for c in state.configs if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
-                other_items = [c for c in state.configs if not (c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep)]
-                insert_pos = next((i for i, c in enumerate(other_items) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == prev_ep), 0)
+                ep_items = [c for c in state.configs if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep]
+                other_items = [c for c in state.configs if not (get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep)]
+                insert_pos = next((i for i, c in enumerate(other_items) if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == prev_ep), 0)
                 state.configs[:] = other_items[:insert_pos] + ep_items + other_items[insert_pos:]
                 state.save_configs()
                 refresh_config_list()
         elif state.selected_cli:
-            clis = list(dict.fromkeys(c.get('cli_type') for c in state.configs))
+            clis = list(dict.fromkeys(get_cli_type(c) for c in state.configs))
             pos = clis.index(state.selected_cli) if state.selected_cli in clis else -1
             if pos > 0:
                 prev_cli = clis[pos - 1]
-                cli_items = [c for c in state.configs if c.get('cli_type') == state.selected_cli]
-                other_items = [c for c in state.configs if c.get('cli_type') != state.selected_cli]
-                insert_pos = next((i for i, c in enumerate(other_items) if c.get('cli_type') == prev_cli), 0)
+                cli_items = [c for c in state.configs if get_cli_type(c) == state.selected_cli]
+                other_items = [c for c in state.configs if get_cli_type(c) != state.selected_cli]
+                insert_pos = next((i for i, c in enumerate(other_items) if get_cli_type(c) == prev_cli), 0)
                 state.configs[:] = other_items[:insert_pos] + cli_items + other_items[insert_pos:]
                 state.save_configs()
                 refresh_config_list()
@@ -275,7 +416,7 @@ def create_api_page(state):
     def move_down(e):
         if state.selected_config is not None:
             cli, ep = state.selected_endpoint.split(':', 1) if state.selected_endpoint else (None, None)
-            same_ep = [i for i, c in enumerate(state.configs) if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
+            same_ep = [i for i, c in enumerate(state.configs) if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep]
             pos = same_ep.index(state.selected_config) if state.selected_config in same_ep else -1
             if pos >= 0 and pos < len(same_ep) - 1:
                 next_idx = same_ep[pos + 1]
@@ -285,28 +426,28 @@ def create_api_page(state):
                 refresh_config_list()
         elif state.selected_endpoint:
             cli, ep = state.selected_endpoint.split(':', 1)
-            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in state.configs if c.get('cli_type') == cli))
+            eps = list(dict.fromkeys(c.get('provider', {}).get('endpoint') for c in state.configs if get_cli_type(c) == cli))
             pos = eps.index(ep) if ep in eps else -1
             if pos >= 0 and pos < len(eps) - 1:
                 next_ep = eps[pos + 1]
-                ep_items = [c for c in state.configs if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep]
-                other_items = [c for c in state.configs if not (c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == ep)]
+                ep_items = [c for c in state.configs if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep]
+                other_items = [c for c in state.configs if not (get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == ep)]
                 last_next = -1
                 for i, c in enumerate(other_items):
-                    if c.get('cli_type') == cli and c.get('provider', {}).get('endpoint') == next_ep:
+                    if get_cli_type(c) == cli and c.get('provider', {}).get('endpoint') == next_ep:
                         last_next = i
                 insert_pos = last_next + 1 if last_next >= 0 else len(other_items)
                 state.configs[:] = other_items[:insert_pos] + ep_items + other_items[insert_pos:]
                 state.save_configs()
                 refresh_config_list()
         elif state.selected_cli:
-            clis = list(dict.fromkeys(c.get('cli_type') for c in state.configs))
+            clis = list(dict.fromkeys(get_cli_type(c) for c in state.configs))
             pos = clis.index(state.selected_cli) if state.selected_cli in clis else -1
             if pos >= 0 and pos < len(clis) - 1:
                 next_cli = clis[pos + 1]
-                cli_items = [c for c in state.configs if c.get('cli_type') == state.selected_cli]
-                other_items = [c for c in state.configs if c.get('cli_type') != state.selected_cli]
-                insert_pos = len([c for c in other_items if clis.index(c.get('cli_type')) <= clis.index(next_cli)])
+                cli_items = [c for c in state.configs if get_cli_type(c) == state.selected_cli]
+                other_items = [c for c in state.configs if get_cli_type(c) != state.selected_cli]
+                insert_pos = len([c for c in other_items if clis.index(get_cli_type(c)) <= clis.index(next_cli)])
                 state.configs[:] = other_items[:insert_pos] + cli_items + other_items[insert_pos:]
                 state.save_configs()
                 refresh_config_list()
@@ -380,7 +521,8 @@ def create_api_page(state):
             page.update()
             return
         cfg = state.configs[state.selected_config]
-        cli_type = cfg.get('cli_type', 'claude')
+        # 使用当前选中的一级节点决定启动哪个 CLI
+        cli_type = state.selected_cli or 'claude'
         cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
         api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
         key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
@@ -391,10 +533,11 @@ def create_api_page(state):
             env[cli_info['base_url_env']] = endpoint
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
         cwd = work_dir_field.value or None
+        cli_cmd = cli_info.get('command', 'claude')
         if sys.platform == 'win32':
-            subprocess.Popen(['cmd', '/k'], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            subprocess.Popen(['cmd', '/k', cli_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
-            subprocess.Popen([terminal_cmd], env=env, cwd=cwd)
+            subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)
 
     def apply_selected_prompt(e):
         if not prompt_dropdown.value:
@@ -407,7 +550,7 @@ def create_api_page(state):
             return
         cli_type = 'claude'
         if state.selected_config is not None:
-            cli_type = state.configs[state.selected_config].get('cli_type', 'claude')
+            cli_type = get_cli_type(state.configs[state.selected_config])
         system_prompt = state.prompt_db.get_system_prompt()
         system_content = system_prompt.get('content', '') if system_prompt else ''
         user_prompt = state.prompts.get(prompt_dropdown.value, {})

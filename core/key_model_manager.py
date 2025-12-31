@@ -5,7 +5,7 @@
 
 from typing import Optional, Dict, Any
 from .key_manager import KeyManager
-from services.api_services.service_factory import ServiceFactory
+from .service_factory import ServiceFactory
 
 
 class KeyModelManager:
@@ -29,7 +29,19 @@ class KeyModelManager:
         if not config:
             raise ValueError(f"Config not found: {config_id}")
 
-        service = self.service_factory.create_service(config)
+        provider = config.get("provider", {})
+        api_key = provider.get("credentials", {}).get("api_key")
+        base_url = provider.get("endpoint")
+        model = self.key_manager.get_model(config_id)
+        provider_type = provider.get("type")
+        max_tokens = provider.get("max_tokens", 32000)
+
+        service = self.service_factory.create_service(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            provider_type=provider_type
+        )
         self._service_cache[config_id] = service
         return service
 

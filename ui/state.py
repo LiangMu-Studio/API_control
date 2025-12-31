@@ -102,7 +102,12 @@ class AppState:
         """构建三级树形结构：CLI工具 → API端点 → 配置项"""
         tree = {}
         for i, cfg in enumerate(self.configs):
-            cli_type = cfg.get('cli_type', 'claude')
+            # 兼容新旧配置格式：优先从 provider.type 映射
+            cli_type = cfg.get('cli_type')
+            if not cli_type:
+                provider_type = cfg.get('provider', {}).get('type', 'anthropic')
+                type_to_cli = {'anthropic': 'claude', 'glm': 'claude', 'gemini': 'gemini', 'openai': 'codex', 'deepseek': 'codex'}
+                cli_type = type_to_cli.get(provider_type, 'claude')
             endpoint = cfg.get('provider', {}).get('endpoint', '未知端点')
             if cli_type not in tree:
                 tree[cli_type] = {}

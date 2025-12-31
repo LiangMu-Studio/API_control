@@ -198,7 +198,7 @@ MODELS_FILE = CONFIG_DIR / "models.json"
 CONFIG_DIR.mkdir(exist_ok=True)
 
 def detect_python_envs():
-    """检测系统中的Python环境"""
+    """检测系统中的Python环境（支持 Conda、venv、virtualenv）"""
     python_envs = {}
 
     # 检测conda环境
@@ -238,13 +238,54 @@ def detect_python_envs():
     if base_env:
         python_envs[base_env[0]] = base_env[1]
 
-    # 只检测非conda环境的Python安装
-    standard_pythons = []
+    # 检测 venv/virtualenv 环境（常见位置）
+    venv_search_paths = []
+    home = Path.home()
+
+    if sys.platform == 'win32':
+        # Windows 常见 venv 位置
+        venv_search_paths = [
+            home / 'venvs',
+            home / '.virtualenvs',
+            home / 'Envs',
+            Path('C:/venvs'),
+        ]
+    else:
+        # Linux/Mac 常见 venv 位置
+        venv_search_paths = [
+            home / '.venvs',
+            home / '.virtualenvs',
+            home / 'venvs',
+            home / '.local/share/virtualenvs',  # pipenv
+        ]
+
+    for venv_dir in venv_search_paths:
+        if venv_dir.exists() and venv_dir.is_dir():
+            for env_folder in venv_dir.iterdir():
+                if env_folder.is_dir():
+                    # 检查是否是有效的 venv
+                    if sys.platform == 'win32':
+                        activate_script = env_folder / 'Scripts' / 'activate.bat'
+                        python_exe = env_folder / 'Scripts' / 'python.exe'
+                    else:
+                        activate_script = env_folder / 'bin' / 'activate'
+                        python_exe = env_folder / 'bin' / 'python'
+
+                    if activate_script.exists() and python_exe.exists():
+                        env_name = f"venv: {env_folder.name}"
+                        python_envs[env_name] = {
+                            'type': 'venv',
+                            'path': str(env_folder),
+                            'is_current': False
+                        }
+
+    # 检测非conda环境的Python安装
+    python_exe_name = 'python.exe' if sys.platform == 'win32' else 'python3'
     python_paths = []
 
     # 从PATH中查找Python，但排除conda目录中的Python
     for path in os.environ['PATH'].split(os.pathsep):
-        python_exe = os.path.join(path, 'python.exe')
+        python_exe = os.path.join(path, python_exe_name)
         if os.path.exists(python_exe):
             # 检查是否在conda目录中，如果是则跳过
             if 'anaconda' not in path.lower() and 'conda' not in path.lower():
@@ -268,21 +309,51 @@ def detect_python_envs():
     return python_envs
 
 def detect_terminals():
+    """检测系统中可用的终端（跨平台）"""
     terminals = {}
-    # Git Bash
-    if is_git_bash_available():
-        git_bash_path = find_git_bash()
-        terminals['Git Bash'] = git_bash_path
-    if shutil.which('pwsh'):
-        terminals['PowerShell 7'] = 'pwsh'
-    if shutil.which('powershell'):
-        terminals['PowerShell 5'] = 'powershell'
-    if shutil.which('cmd'):
-        terminals['CMD'] = 'cmd'
+
+    if sys.platform == 'win32':
+        # Windows
+        if is_git_bash_available():
+            git_bash_path = find_git_bash()
+            terminals['Git Bash'] = git_bash_path
+        if shutil.which('pwsh'):
+            terminals['PowerShell 7'] = 'pwsh'
+        if shutil.which('powershell'):
+            terminals['PowerShell 5'] = 'powershell'
+        if shutil.which('cmd'):
+            terminals['CMD'] = 'cmd'
+    elif sys.platform == 'darwin':
+        # macOS
+        terminals['Terminal'] = 'Terminal'
+        # 检测 iTerm2
+        if Path('/Applications/iTerm.app').exists():
+            terminals['iTerm2'] = 'iTerm'
+        if shutil.which('zsh'):
+            terminals['zsh'] = 'zsh'
+        if shutil.which('bash'):
+            terminals['bash'] = 'bash'
+    else:
+        # Linux
+        if shutil.which('gnome-terminal'):
+            terminals['GNOME Terminal'] = 'gnome-terminal'
+        if shutil.which('konsole'):
+            terminals['Konsole'] = 'konsole'
+        if shutil.which('xfce4-terminal'):
+            terminals['XFCE Terminal'] = 'xfce4-terminal'
+        if shutil.which('xterm'):
+            terminals['xterm'] = 'xterm'
+        if shutil.which('bash'):
+            terminals['bash'] = 'bash'
+        if shutil.which('zsh'):
+            terminals['zsh'] = 'zsh'
+
     return terminals
 
 def has_windows_terminal():
     """检测是否安装了 Windows Terminal"""
+    if sys.platform != 'win32':
+        return False
     return shutil.which('wt') is not None
 
 def encode_powershell_command(cmd):
@@ -293,28 +364,32 @@ def encode_powershell_command(cmd):
     return encoded
 
 def run_terminal(args, env, cwd=None):
-    """统一的终端启动函数，自动处理 Windows Terminal"""
-    use_wt = has_windows_terminal()
-
-    if use_wt:
-        # 检查是否是 PowerShell 命令，如果是则用 EncodedCommand 避免分号问题
-        if args[0] in ('pwsh', 'powershell') and '-Command' in args:
-            cmd_index = args.index('-Command')
-            shell = args[0]
-            cmd = args[cmd_index + 1]
-            encoded = encode_powershell_command(cmd)
-            # 构建新的参数列表，用 -EncodedCommand 替代 -Command
-            new_args = [shell, '-NoExit', '-EncodedCommand', encoded]
-            wt_args = ['wt', '-d', cwd or '.'] + new_args
-            print(f"[DEBUG] 使用 Windows Terminal (EncodedCommand)")
-            subprocess.Popen(wt_args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    """统一的终端启动函数（跨平台）"""
+    if sys.platform == 'win32':
+        use_wt = has_windows_terminal()
+        if use_wt:
+            # 检查是否是 PowerShell 命令，如果是则用 EncodedCommand 避免分号问题
+            if args[0] in ('pwsh', 'powershell') and '-Command' in args:
+                cmd_index = args.index('-Command')
+                shell = args[0]
+                cmd = args[cmd_index + 1]
+                encoded = encode_powershell_command(cmd)
+                # 构建新的参数列表，用 -EncodedCommand 替代 -Command
+                new_args = [shell, '-NoExit', '-EncodedCommand', encoded]
+                wt_args = ['wt', '-d', cwd or '.'] + new_args
+                print(f"[DEBUG] 使用 Windows Terminal (EncodedCommand)")
+                subprocess.Popen(wt_args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                wt_args = ['wt', '-d', cwd or '.', '--'] + args
+                print(f"[DEBUG] 使用 Windows Terminal: {wt_args}")
+                subprocess.Popen(wt_args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
-            wt_args = ['wt', '-d', cwd or '.', '--'] + args
-            print(f"[DEBUG] 使用 Windows Terminal: {wt_args}")
-            subprocess.Popen(wt_args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            print(f"[DEBUG] 直接启动: {args}")
+            subprocess.Popen(args, env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        print(f"[DEBUG] 直接启动: {args}")
-        subprocess.Popen(args, env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        # Linux/macOS - 不使用 CREATE_NEW_CONSOLE
+        print(f"[DEBUG] 启动终端: {args}")
+        subprocess.Popen(args, env=env, cwd=cwd)
 
 def load_settings():
     if SETTINGS_FILE.exists():
@@ -342,8 +417,14 @@ def load_settings():
     python_envs = detect_python_envs()
 
     if not terminals:
-        terminals = {'CMD': 'cmd'}
-    # 首次使用时，默认是 Git Bash（第一个）
+        # 跨平台默认终端
+        if sys.platform == 'win32':
+            terminals = {'CMD': 'cmd'}
+        elif sys.platform == 'darwin':
+            terminals = {'Terminal': 'Terminal'}
+        else:
+            terminals = {'bash': 'bash'}
+    # 首次使用时，默认是第一个终端
     default_terminal = list(terminals.keys())[0]
     default_python_env = get_default_python_env(python_envs)
 
@@ -929,7 +1010,7 @@ class App:
                 self.refresh_list()
 
     def get_python_activation_command(self, python_env_name):
-        """获取Python环境激活命令"""
+        """获取Python环境激活命令（跨平台，支持 conda/venv）"""
         if not python_env_name or python_env_name not in self.settings.get('python_envs', {}):
             return ""
 
@@ -938,15 +1019,22 @@ class App:
         env_path = python_env_info['path']
 
         if env_type == 'conda':
-            # 对于conda环境，使用conda activate命令（不要加&&，让终端保持打开）
+            # Conda 环境激活（跨平台通用）
             if python_env_name == 'base':
                 return "conda activate base"
             else:
                 return f"conda activate {python_env_name}"
+        elif env_type == 'venv':
+            # venv/virtualenv 环境激活
+            if sys.platform == 'win32':
+                activate_script = os.path.join(env_path, 'Scripts', 'activate.bat')
+                return f'call "{activate_script}"'
+            else:
+                activate_script = os.path.join(env_path, 'bin', 'activate')
+                return f'source "{activate_script}"'
         elif env_type == 'standard':
-            python_dir = os.path.dirname(env_path)
-            if os.path.exists(os.path.join(python_dir, 'activate')):
-                return f"call \"{os.path.join(python_dir, 'activate')}\" && "
+            # 标准 Python，无需激活
+            return ""
 
         return ""
 
@@ -1075,7 +1163,54 @@ class App:
                     else:
                         run_terminal(['cmd', '/k'], env, cwd)
             else:
-                subprocess.Popen(terminal_cmd, env=env, cwd=cwd, shell=True)
+                # Linux/macOS
+                activation_cmd = self.get_python_activation_command(python_env_name)
+                env_cmd = f'export {key_name}="{api_key}"'
+                if endpoint:
+                    env_cmd += f'; export {base_url_env}="{endpoint}"'
+
+                if activation_cmd:
+                    full_cmd = f'{env_cmd}; {activation_cmd}; {cli_command}'
+                else:
+                    full_cmd = f'{env_cmd}; {cli_command}'
+
+                print(f"[DEBUG] Linux/macOS 命令: {full_cmd}")
+
+                if sys.platform == 'darwin':
+                    # macOS
+                    if terminal_cmd == 'Terminal':
+                        # 使用 AppleScript 打开 Terminal.app
+                        script = f'''tell application "Terminal"
+                            activate
+                            do script "cd {cwd or '~'} && {full_cmd}"
+                        end tell'''
+                        subprocess.Popen(['osascript', '-e', script], env=env)
+                    elif terminal_cmd == 'iTerm':
+                        # 使用 AppleScript 打开 iTerm2
+                        script = f'''tell application "iTerm"
+                            activate
+                            create window with default profile
+                            tell current session of current window
+                                write text "cd {cwd or '~'} && {full_cmd}"
+                            end tell
+                        end tell'''
+                        subprocess.Popen(['osascript', '-e', script], env=env)
+                    else:
+                        # zsh/bash 直接运行
+                        run_terminal([terminal_cmd, '-i', '-c', full_cmd], env, cwd)
+                else:
+                    # Linux
+                    if terminal_cmd == 'gnome-terminal':
+                        run_terminal(['gnome-terminal', '--', 'bash', '-c', f'{full_cmd}; exec bash'], env, cwd)
+                    elif terminal_cmd == 'konsole':
+                        run_terminal(['konsole', '-e', 'bash', '-c', f'{full_cmd}; exec bash'], env, cwd)
+                    elif terminal_cmd == 'xfce4-terminal':
+                        run_terminal(['xfce4-terminal', '-e', f'bash -c "{full_cmd}; exec bash"'], env, cwd)
+                    elif terminal_cmd == 'xterm':
+                        run_terminal(['xterm', '-e', f'bash -c "{full_cmd}; exec bash"'], env, cwd)
+                    else:
+                        # bash/zsh 直接运行
+                        run_terminal([terminal_cmd, '-i', '-c', full_cmd], env, cwd)
         except Exception as e:
             messagebox.showerror(self.L['error'], self.L['cannot_open_terminal'].format(str(e)))
 

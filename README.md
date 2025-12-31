@@ -1,4 +1,4 @@
-# LiangMu-Studio API Key Manager v1.0 - 多CLI集成终端
+# AI CLI Manager v2.2
 
 [English](#english) | [中文](#中文)
 
@@ -227,4 +227,4 @@ LiangMu-Studio
 
 ## Feedback / 反馈
 
-[Issues](https://github.com/LiangMu-Studio/API_control/issues)
+[Issues](https://github.com/LiangMu-Studio/AI_CLI_Manager/issues)

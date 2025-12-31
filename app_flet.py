@@ -1,8 +1,8 @@
-# LiangMu-Studio API Key Manager - Flet Version
+# AI CLI Manager - Flet Version
 # Copyright (c) 2025 LiangMu-Studio
 # Licensed under GPL v3
 
-VERSION = "2.1"
+VERSION = "2.2"
 
 import flet as ft
 import json
@@ -989,7 +989,7 @@ def detect_prompt_from_file(file_path: Path) -> tuple[str | None, str | None, st
 # 多语言支持
 LANG = {
     'zh': {
-        'title': 'LiangMu-Studio API Key v{}',
+        'title': 'AI CLI Manager v{}',
         'api_config': 'API 密钥配置',
         'prompts': '提示词',
         'prompt_builtin': '(内置)',
@@ -1035,7 +1035,7 @@ LANG = {
         'export': '导出',
         'import': '导入',
         'feedback': '反馈: GitHub Issues',
-        'copy_key': '复制KEY',
+        'copy_key': '复制',
         'exported_to': '配置已导出到: {}',
         'imported_count': '已导入 {} 个配置',
         # 历史管理
@@ -1168,7 +1168,7 @@ LANG = {
         'history_empty_label': '空项目目录: {}个',
     },
     'en': {
-        'title': 'LiangMu-Studio API Key v{}',
+        'title': 'AI CLI Manager v{}',
         'api_config': 'API Key Config',
         'prompts': 'Prompts',
         'prompt_builtin': '(Built-in)',
@@ -1725,7 +1725,7 @@ def main(page: ft.Page):
 
     def open_feedback(e):
         import webbrowser
-        webbrowser.open('https://github.com/LiangMu-Studio/API_control/issues')
+        webbrowser.open('https://github.com/LiangMu-Studio/AI_CLI_Manager/issues')
 
     def show_config_dialog(idx):
         is_edit = idx is not None
@@ -3026,7 +3026,7 @@ def main(page: ft.Page):
             ft.Text(L['mcp'], size=20, weight=ft.FontWeight.BOLD),
             ft.IconButton(ft.Icons.ADD, on_click=add_mcp, tooltip=L['add']),
             ft.IconButton(ft.Icons.DOWNLOAD, on_click=show_import_menu, tooltip=L['mcp_import']),
-            ft.IconButton(ft.Icons.CLOUD_SYNC, on_click=show_mcp_repository, tooltip=L['mcp_browse']),
+            ft.IconButton(ft.Icons.INVENTORY_2, on_click=show_mcp_repository, tooltip=L['mcp_browse']),
             ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=add_from_official, tooltip=L['mcp_official']),
             ft.IconButton(ft.Icons.STORE, on_click=browse_mcp_market, tooltip=L['mcp_market']),
             ft.IconButton(ft.Icons.EDIT, on_click=edit_mcp, tooltip=L['edit']),

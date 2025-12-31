@@ -2991,7 +2991,12 @@ def main(page: ft.Page):
             ft.TextButton("打开位置", on_click=lambda _: open_file_location(info)),
         ], spacing=5))
         history_detail.controls.append(ft.Divider())
-        for msg in info['messages']:
+
+        # 分页加载消息：开头10条 + 结尾10条，中间折叠
+        messages = info['messages']
+        head_count, tail_count = 10, 10
+
+        def render_message(msg):
             if current_cli == "claude":
                 role = msg.get('message', {}).get('role', '未知')
                 ts = msg.get('timestamp', '')
@@ -2999,8 +3004,14 @@ def main(page: ft.Page):
                 text = ""
                 if isinstance(content, list):
                     for c in content:
-                        if isinstance(c, dict) and c.get('type') == 'text':
-                            text += c.get('text', '')
+                        if isinstance(c, dict):
+                            t = c.get('type', '')
+                            if t == 'text':
+                                text += c.get('text', '')
+                            elif t == 'tool_use':
+                                text += f"[工具: {c.get('name', '')}] "
+                            elif t == 'tool_result':
+                                text += f"[工具结果] "
                 elif isinstance(content, str):
                     text = content
             else:  # codex
@@ -3014,9 +3025,10 @@ def main(page: ft.Page):
                             text += c.get('text', '')
                 else:
                     text = str(content)
+            if not text.strip():
+                text = "(无文本内容)"
             color = ft.Colors.with_opacity(0.15, ft.Colors.BLUE) if role == 'user' else ft.Colors.with_opacity(0.15, ft.Colors.GREEN)
-            full_text = text  # 保存完整文本用于弹窗
-            history_detail.controls.append(ft.GestureDetector(
+            return ft.GestureDetector(
                 content=ft.Container(
                     content=ft.Column([
                         ft.Text(f"{role.upper()} ({ts[:19] if ts else ''})", size=12, weight=ft.FontWeight.BOLD, font_family="SimSun"),
@@ -3024,8 +3036,37 @@ def main(page: ft.Page):
                     ]),
                     bgcolor=color, padding=10, border_radius=8, margin=ft.margin.only(bottom=5),
                 ),
-                on_double_tap=lambda _, t=full_text, r=role, ts_=ts: show_message_detail(t, r, ts_),
-            ))
+                on_double_tap=lambda _, t=text, r=role, ts_=ts: show_message_detail(t, r, ts_),
+            )
+
+        middle_count = len(messages) - head_count - tail_count
+        if middle_count <= 0:
+            # 消息少，全部显示
+            for msg in messages:
+                history_detail.controls.append(render_message(msg))
+        else:
+            # 显示开头
+            for msg in messages[:head_count]:
+                history_detail.controls.append(render_message(msg))
+            # 中间折叠按钮（醒目样式）
+            middle_msgs = messages[head_count:-tail_count]
+            def expand_middle(_):
+                idx = history_detail.controls.index(expand_btn)
+                history_detail.controls.remove(expand_btn)
+                for i, msg in enumerate(middle_msgs):
+                    history_detail.controls.insert(idx + i, render_message(msg))
+                page.update()
+            expand_btn = ft.Container(
+                content=ft.Column([
+                    ft.Divider(color=ft.Colors.ORANGE),
+                    ft.TextButton(f"▼ 展开中间 {len(middle_msgs)} 条消息 ▼", style=ft.ButtonStyle(color=ft.Colors.ORANGE), on_click=expand_middle),
+                    ft.Divider(color=ft.Colors.ORANGE),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0),
+            )
+            history_detail.controls.append(expand_btn)
+            # 显示结尾
+            for msg in messages[-tail_count:]:
+                history_detail.controls.append(render_message(msg))
         page.update()
 
     def show_message_detail(text, role, ts):

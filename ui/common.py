@@ -64,7 +64,13 @@ def debug_print(msg):
         print(f"[{time.time():.3f}] {msg}")
 
 # ========== 配置文件路径 ==========
-CONFIG_DIR = Path(__file__).parent.parent / "data"
+# 打包后使用 exe 所在目录，开发时使用项目目录
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent.parent
+
+CONFIG_DIR = BASE_DIR / "data"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 PROMPTS_FILE = CONFIG_DIR / "prompts.json"
@@ -73,7 +79,7 @@ MCP_REGISTRY_FILE = CONFIG_DIR / "mcp_registry.json"
 DB_FILE = CONFIG_DIR / "prompts.db"
 CONFIG_DIR.mkdir(exist_ok=True)
 
-MCP_DATA_DIR = Path(__file__).parent.parent / "mcp_data"
+MCP_DATA_DIR = BASE_DIR / "mcp_data"
 MCP_DATA_DIR.mkdir(exist_ok=True)
 MCP_DB_FILE = MCP_DATA_DIR / "mcp_registry.db"
 

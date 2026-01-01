@@ -69,6 +69,7 @@ def main(page: ft.Page):
     def switch_page(e):
         idx = e.control.selected_index
         current_page_idx[0] = idx
+        t = state.get_theme()
         if idx == 0:
             content_area.content = api_page
             refresh_api()
@@ -81,6 +82,7 @@ def main(page: ft.Page):
         elif idx == 3:
             content_area.content = history_page
             refresh_history()
+        content_area.bgcolor = t["surface"]
         page.update()
 
     def refresh_title_bar():
@@ -100,6 +102,8 @@ def main(page: ft.Page):
         page.bgcolor = state.get_theme()['bg']
         page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
         refresh_title_bar()
+        refresh_api()
+        refresh_prompts()
         page.update()
 
     def switch_lang(_):

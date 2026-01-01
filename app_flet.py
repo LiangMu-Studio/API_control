@@ -1,11 +1,19 @@
-﻿# AI CLI Manager - Flet Version (Modular)
+# AI CLI Manager - Flet Version (Modular)
 # Copyright (c) 2025 LiangMu-Studio
 # Licensed under GPL v3
 
 import flet as ft
 import asyncio
+import sys
+from pathlib import Path
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs
+
+# 获取图标路径（兼容打包后）
+if getattr(sys, 'frozen', False):
+    ICON_PATH = str(Path(sys.executable).parent / "icon.ico")
+else:
+    ICON_PATH = "icon.ico"
 from ui.database import history_manager, codex_history_manager, history_cache
 from ui.pages.api_keys import create_api_page
 from ui.pages.prompts import create_prompts_page
@@ -18,9 +26,11 @@ def main(page: ft.Page):
     page.window.width = 1200
     page.window.height = 800
     page.padding = 0
-    page.window.icon = "icon.ico"
+    page.window.icon = ICON_PATH
+    page.window.title_bar_hidden = True
+    page.window.title_bar_buttons_hidden = True
 
-    # 鍒濆鍖栫姸鎬?
+    # 初始化状态
     state = AppState(page)
     L = state.L
     theme = state.get_theme()
@@ -28,7 +38,26 @@ def main(page: ft.Page):
     page.bgcolor = theme['bg']
     page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
 
-    # 鍒涘缓椤甸潰
+    # 自定义标题栏
+    title_bar = ft.WindowDragArea(
+        content=ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.TERMINAL, size=18, color=theme["text"]),
+                ft.Text(f"AI CLI Manager v{VERSION}", size=14, color=theme["text"], weight=ft.FontWeight.BOLD),
+                ft.Container(expand=True),
+                ft.IconButton(ft.Icons.MINIMIZE, icon_size=16, icon_color=theme["text_sec"],
+                             on_click=lambda _: setattr(page.window, 'minimized', True) or page.update()),
+                ft.IconButton(ft.Icons.CROP_SQUARE, icon_size=16, icon_color=theme["text_sec"],
+                             on_click=lambda _: setattr(page.window, 'maximized', not page.window.maximized) or page.update()),
+                ft.IconButton(ft.Icons.CLOSE, icon_size=16, icon_color=theme["text_sec"],
+                             on_click=lambda _: page.window.close()),
+            ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            bgcolor=theme["surface"],
+            padding=ft.padding.only(left=10, right=5, top=5, bottom=5),
+        )
+    )
+
+    # 创建页面
     api_page, refresh_api = create_api_page(state)
     prompt_page, refresh_prompts = create_prompts_page(state)
     mcp_page, refresh_mcp = create_mcp_page(state)
@@ -54,10 +83,23 @@ def main(page: ft.Page):
             refresh_history()
         page.update()
 
+    def refresh_title_bar():
+        t = state.get_theme()
+        container = title_bar.content
+        container.bgcolor = t["surface"]
+        for ctrl in container.content.controls:
+            if isinstance(ctrl, ft.Icon):
+                ctrl.color = t["text"]
+            elif isinstance(ctrl, ft.Text):
+                ctrl.color = t["text"]
+            elif isinstance(ctrl, ft.IconButton):
+                ctrl.icon_color = t["text_sec"]
+
     def toggle_theme(_):
         state.toggle_theme()
         page.bgcolor = state.get_theme()['bg']
         page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
+        refresh_title_bar()
         page.update()
 
     def switch_lang(_):
@@ -94,10 +136,11 @@ def main(page: ft.Page):
         ),
     )
 
-    page.add(ft.Row([nav_rail, ft.VerticalDivider(width=1), content_area], expand=True))
+    main_content = ft.Row([nav_rail, ft.VerticalDivider(width=1), content_area], expand=True)
+    page.add(ft.Column([title_bar, main_content], spacing=0, expand=True))
     refresh_api()
 
-    # 鍚庡彴棰勫姞杞藉巻鍙?
+    # 后台预加载历史
     async def preload_history():
         loop = asyncio.get_event_loop()
         if history_manager:

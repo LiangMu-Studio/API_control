@@ -8,6 +8,7 @@ from .glm_api_service import GLMAPIService
 from .gemini_service import GeminiService
 from .openai_service import OpenAIService
 from .anthropic_service import AnthropicService
+from .deepseek_service import DeepSeekService
 
 
 class ServiceFactory:
@@ -61,6 +62,13 @@ class ServiceFactory:
                 model or 'gpt-4'
             )
 
+        elif api_type == APIType.DEEPSEEK:
+            return DeepSeekService(
+                api_key,
+                base_url,
+                model or 'DeepSeek-V3.2'
+            )
+
         elif api_type == APIType.STANDARD_ANTHROPIC:
             return AnthropicService(
                 api_key,
@@ -107,6 +115,14 @@ class ServiceFactory:
             APIType.OPENAI: {
                 "name": "OpenAI",
                 "endpoint": "api.openai.com",
+                "auth": "Bearer",
+                "stream": True,
+                "tools": False,
+                "thinking_mode": False,
+            },
+            APIType.DEEPSEEK: {
+                "name": "DeepSeek",
+                "endpoint": "api.deepseek.com",
                 "auth": "Bearer",
                 "stream": True,
                 "tools": False,

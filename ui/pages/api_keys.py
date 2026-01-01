@@ -234,6 +234,10 @@ def create_api_page(state):
             label=L.get('base_url_env', 'API地址环境变量'),
             value=provider_data.get('base_url_env', default_base_url_env), expand=True,
         )
+        model_env_field = ft.TextField(
+            label=L.get('model_env', '模型环境变量'),
+            value=provider_data.get('model_env', ''), expand=True,
+        )
         api_key_field = ft.TextField(
             label=L['api_key'], value=provider_data.get('credentials', {}).get('api_key', ''),
             password=True, can_reveal_password=True, expand=True,
@@ -272,6 +276,7 @@ def create_api_page(state):
             cli = cli_dropdown.value
             cli_info = CLI_TOOLS.get(cli, CLI_TOOLS['claude'])
             base_url_env_field.value = cli_info.get('base_url_env', 'API_BASE_URL')
+            model_env_field.value = ''
             page.update()
 
         provider_dropdown.on_change = on_provider_change
@@ -322,6 +327,7 @@ def create_api_page(state):
                     'endpoint': endpoint_field.value,
                     'key_name': key_name_field.value,
                     'base_url_env': base_url_env_field.value,
+                    'model_env': model_env_field.value,
                     'credentials': {'api_key': api_key_field.value},
                     'selected_model': selected_model,
                     'available_models': [selected_model] if selected_model else [],
@@ -349,9 +355,11 @@ def create_api_page(state):
             content=ft.Column([
                 name_field,
                 ft.Row([cli_dropdown, provider_dropdown]),
+                model_env_field,
                 model_dropdown,
+                base_url_env_field,
                 endpoint_field,
-                ft.Row([key_name_field, base_url_env_field]),
+                key_name_field,
                 api_key_field,
                 ft.Row([max_tokens_field, token_limit_field]),
             ], tight=True, spacing=10, width=500),
@@ -544,8 +552,8 @@ def create_api_page(state):
             page.update()
             return
         cfg = state.configs[state.selected_config]
-        # 使用当前选中的一级节点决定启动哪个 CLI
-        cli_type = state.selected_cli or 'claude'
+        # 优先使用配置中保存的 cli_type
+        cli_type = cfg.get('cli_type') or state.selected_cli or 'claude'
         cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
         api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
         key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
@@ -556,6 +564,11 @@ def create_api_page(state):
         env[key_name] = api_key
         if endpoint:
             env[base_url_env] = endpoint
+        # 调试：打印环境变量
+        print(f"[DEBUG] cli_type={cli_type}, command={cli_info.get('command')}")
+        print(f"[DEBUG] {key_name}={api_key[:20]}...")
+        print(f"[DEBUG] {base_url_env}={endpoint}")
+        print(f"[DEBUG] model={selected_model}")
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
         cwd = work_dir_field.value or None
         cli_cmd = cli_info.get('command', 'claude')
@@ -563,7 +576,16 @@ def create_api_page(state):
         if selected_model:
             cli_cmd = f"{cli_cmd} --model {selected_model}"
         if sys.platform == 'win32':
-            subprocess.Popen(['cmd', '/k', cli_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            # 构建设置环境变量的命令
+            set_cmds = [f'set {key_name}={api_key}']
+            if endpoint:
+                set_cmds.append(f'set {base_url_env}={endpoint}')
+            if selected_model:
+                model_env = cfg.get('provider', {}).get('model_env', '')
+                if model_env:
+                    set_cmds.append(f'set {model_env}={selected_model}')
+            full_cmd = ' && '.join(set_cmds + [cli_cmd])
+            subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
             subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)
 

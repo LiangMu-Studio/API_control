@@ -527,6 +527,7 @@ def create_api_page(state):
         api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
         key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
         endpoint = cfg.get('provider', {}).get('endpoint', '')
+        selected_model = cfg.get('provider', {}).get('selected_model', '')
         env = os.environ.copy()
         env[key_name] = api_key
         if endpoint:
@@ -534,6 +535,9 @@ def create_api_page(state):
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
         cwd = work_dir_field.value or None
         cli_cmd = cli_info.get('command', 'claude')
+        # 如果配置了模型，添加 --model 参数
+        if selected_model:
+            cli_cmd = f"{cli_cmd} --model {selected_model}"
         if sys.platform == 'win32':
             subprocess.Popen(['cmd', '/k', cli_cmd], env=env, cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:

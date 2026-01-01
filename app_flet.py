@@ -18,6 +18,7 @@ def main(page: ft.Page):
     page.window.width = 1200
     page.window.height = 800
     page.padding = 0
+    page.window.icon = "icon.ico"
 
     # 鍒濆鍖栫姸鎬?
     state = AppState(page)

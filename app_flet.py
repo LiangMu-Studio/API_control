@@ -5,15 +5,37 @@
 import flet as ft
 import asyncio
 import sys
+import os
 from pathlib import Path
+
+# 单实例锁（Windows）
+if sys.platform == 'win32':
+    import ctypes
+
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "AI_CLI_Manager_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        # 查找并激活已有窗口
+        hwnd = ctypes.windll.user32.FindWindowW(None, None)
+        while hwnd:
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                if "AI CLI Manager" in buf.value:
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    break
+            hwnd = ctypes.windll.user32.GetWindow(hwnd, 2)  # GW_HWNDNEXT
+        sys.exit(0)
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs
 
 # 获取图标路径（兼容打包后）
 if getattr(sys, 'frozen', False):
-    ICON_PATH = str(Path(sys.executable).parent / "icon.ico")
+    BASE_DIR = Path(sys.executable).parent
 else:
-    ICON_PATH = "icon.ico"
+    BASE_DIR = Path(__file__).parent
+ICON_PATH = str(BASE_DIR / "icon.ico")
 from ui.database import history_manager, codex_history_manager, history_cache
 from ui.pages.api_keys import create_api_page
 from ui.pages.prompts import create_prompts_page

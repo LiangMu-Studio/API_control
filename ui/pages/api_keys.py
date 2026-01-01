@@ -202,6 +202,14 @@ def create_api_page(state):
 
         name_field = ft.TextField(label=L['name'], value=cfg.get('label', ''), expand=True)
 
+        # CLI 下拉
+        cli_dropdown = ft.Dropdown(
+            label=L.get('cli_tool', 'CLI 工具'),
+            value=cfg.get('cli_type', 'claude'),
+            options=[ft.dropdown.Option(k, v['name']) for k, v in CLI_TOOLS.items()],
+            expand=True,
+        )
+
         # 提供商下拉
         provider_dropdown = ft.Dropdown(
             label=L.get('provider', '提供商'),
@@ -218,6 +226,13 @@ def create_api_page(state):
         )
         key_name_field = ft.TextField(
             label=L['key_name'], value=provider_data.get('key_name', PROVIDER_DEFAULTS['anthropic']['key_name']), expand=True,
+        )
+        # 获取默认的 base_url_env
+        init_cli = cfg.get('cli_type', 'claude')
+        default_base_url_env = CLI_TOOLS.get(init_cli, CLI_TOOLS['claude']).get('base_url_env', 'API_BASE_URL')
+        base_url_env_field = ft.TextField(
+            label=L.get('base_url_env', 'API地址环境变量'),
+            value=provider_data.get('base_url_env', default_base_url_env), expand=True,
         )
         api_key_field = ft.TextField(
             label=L['api_key'], value=provider_data.get('credentials', {}).get('api_key', ''),
@@ -253,7 +268,14 @@ def create_api_page(state):
                 model_dropdown.value = None
             page.update()
 
+        def on_cli_change(e):
+            cli = cli_dropdown.value
+            cli_info = CLI_TOOLS.get(cli, CLI_TOOLS['claude'])
+            base_url_env_field.value = cli_info.get('base_url_env', 'API_BASE_URL')
+            page.update()
+
         provider_dropdown.on_change = on_provider_change
+        cli_dropdown.on_change = on_cli_change
 
         # 初始化模型列表
         init_provider = provider_data.get('type', 'anthropic')
@@ -294,11 +316,12 @@ def create_api_page(state):
             new_cfg = {
                 'id': cfg.get('id', f"{name_field.value}-{int(datetime.now().timestamp())}"),
                 'label': name_field.value,
-                'cli_type': 'claude',
+                'cli_type': cli_dropdown.value,
                 'provider': {
                     'type': provider_type,
                     'endpoint': endpoint_field.value,
                     'key_name': key_name_field.value,
+                    'base_url_env': base_url_env_field.value,
                     'credentials': {'api_key': api_key_field.value},
                     'selected_model': selected_model,
                     'available_models': [selected_model] if selected_model else [],
@@ -325,10 +348,10 @@ def create_api_page(state):
             title=ft.Text(L['edit'] if is_edit else L['add']),
             content=ft.Column([
                 name_field,
-                provider_dropdown,
+                ft.Row([cli_dropdown, provider_dropdown]),
                 model_dropdown,
                 endpoint_field,
-                key_name_field,
+                ft.Row([key_name_field, base_url_env_field]),
                 api_key_field,
                 ft.Row([max_tokens_field, token_limit_field]),
             ], tight=True, spacing=10, width=500),
@@ -527,11 +550,12 @@ def create_api_page(state):
         api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
         key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
         endpoint = cfg.get('provider', {}).get('endpoint', '')
+        base_url_env = cfg.get('provider', {}).get('base_url_env', cli_info['base_url_env'])
         selected_model = cfg.get('provider', {}).get('selected_model', '')
         env = os.environ.copy()
         env[key_name] = api_key
         if endpoint:
-            env[cli_info['base_url_env']] = endpoint
+            env[base_url_env] = endpoint
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
         cwd = work_dir_field.value or None
         cli_cmd = cli_info.get('command', 'claude')
@@ -573,7 +597,7 @@ def create_api_page(state):
     # 构建页面
     api_page = ft.Column([
         ft.Row([
-            ft.Container(config_tree, expand=True, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8),
+            ft.Container(config_tree, expand=True, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, clip_behavior=ft.ClipBehavior.HARD_EDGE),
             ft.Column([
                 ft.OutlinedButton(L['add'], icon=ft.Icons.ADD, on_click=add_config, width=120),
                 ft.OutlinedButton(L['edit'], icon=ft.Icons.EDIT, on_click=edit_config, width=120),
@@ -584,7 +608,7 @@ def create_api_page(state):
                 ft.OutlinedButton(L['export'], icon=ft.Icons.UPLOAD, on_click=export_configs, width=120),
                 ft.OutlinedButton(L['import'], icon=ft.Icons.DOWNLOAD, on_click=import_configs, width=120),
             ], spacing=5, alignment=ft.MainAxisAlignment.START),
-        ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START),
+        ], expand=1, vertical_alignment=ft.CrossAxisAlignment.STRETCH),
         ft.Divider(),
         ft.Text(L['terminal'], size=16, weight=ft.FontWeight.BOLD),
         ft.Row([

@@ -170,6 +170,10 @@ LANG = {
         'history_empty_label': '空项目目录: {}个',
         'custom': '自定义...',
         'custom_model': '自定义模型',
+        'screenshot': '截图',
+        'screenshot_saved': '截图已保存: {}',
+        'pick_path': '抓取路径',
+        'path_copied': '路径已复制: {}',
     },
     'en': {
         'title': 'AI CLI Manager v{}',
@@ -341,5 +345,9 @@ LANG = {
         'history_empty_label': 'Empty project dirs: {}',
         'custom': 'Custom...',
         'custom_model': 'Custom Model',
+        'screenshot': 'Screenshot',
+        'screenshot_saved': 'Screenshot saved: {}',
+        'pick_path': 'Pick Path',
+        'path_copied': 'Path copied: {}',
     }
 }

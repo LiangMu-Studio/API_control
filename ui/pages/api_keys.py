@@ -807,6 +807,27 @@ def create_api_page(state):
 
         threading.Thread(target=run, daemon=True).start()
 
+    # 路径抓取功能
+    def pick_path(e):
+        """启动路径抓取工具"""
+        import subprocess
+        import threading
+
+        script = str(Path(__file__).parent.parent / "tools" / "path_picker.py")
+
+        def run():
+            result = subprocess.run(
+                [sys.executable, script],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                path = result.stdout.strip()
+                if path:
+                    page.set_clipboard(path)
+                    show_snackbar(page, L.get('path_copied', f'路径已复制: {path}'))
+
+        threading.Thread(target=run, daemon=True).start()
+
     # 快捷键设置
     from ..hotkey import load_hotkey, update_hotkey
 
@@ -915,6 +936,7 @@ def create_api_page(state):
             prompt_dropdown,
             ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),
             ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, on_click=take_screenshot, width=100, tooltip="截图保留一周"),
+            ft.ElevatedButton(L.get('pick_path', '抓取路径'), icon=ft.Icons.LINK, on_click=pick_path, width=110, tooltip="选择文件复制绝对路径"),
             hotkey_btn,
         ], spacing=10),
     ], expand=True, spacing=10)

@@ -84,6 +84,9 @@ def create_api_page(state):
     state.config_tree = config_tree
     state.current_key_label = current_key_label
 
+    # 缓存控件引用
+    _tree_refs = {"cli": {}, "endpoint": {}, "config": {}}
+
     # 终端和环境下拉
     terminal_dropdown = ft.Dropdown(
         label=L['select_terminal'],
@@ -123,76 +126,114 @@ def create_api_page(state):
     # 工作目录 MCP 状态
     workdir_mcp_enabled = {}
 
+    def _on_cli_click(cli_key):
+        if state.selected_cli == cli_key and state.selected_endpoint is None and state.selected_config is None:
+            state.toggle_cli(cli_key)
+            refresh_config_list()
+        else:
+            state.select_cli(cli_key)
+            _update_selection()
+        page.update()
+
+    def _on_endpoint_click(ep_key):
+        if state.selected_endpoint == ep_key and state.selected_config is None:
+            state.toggle_endpoint(ep_key)
+            refresh_config_list()
+        else:
+            state.select_endpoint(ep_key)
+            _update_selection()
+        page.update()
+
+    def _on_config_click(idx):
+        state.select_config(idx)
+        _update_selection()
+        page.update()
+
+    def _update_selection():
+        theme = state.get_theme()
+        for k, ref in _tree_refs["cli"].items():
+            sel = state.selected_cli == k and state.selected_endpoint is None and state.selected_config is None
+            ref["c"].bgcolor = theme['selection_bg'] if sel else theme['header_bg']
+            ref["t"].color = theme['text_selected'] if sel else theme['text']
+        for k, ref in _tree_refs["endpoint"].items():
+            sel = state.selected_endpoint == k and state.selected_config is None
+            ref["c"].bgcolor = theme['selection_bg'] if sel else None
+            ref["t"].color = theme['text_selected'] if sel else theme['text']
+        for i, ref in _tree_refs["config"].items():
+            sel = state.selected_config == i
+            ref["c"].bgcolor = theme['selection_bg'] if sel else None
+            ref["t"].weight = ft.FontWeight.BOLD if sel else None
+            ref["t"].color = theme['text_selected'] if sel else theme['text']
+            ref["i"].color = theme['icon_key_selected'] if sel else ft.Colors.GREY_600
+
     def refresh_config_list():
         config_tree.controls.clear()
+        _tree_refs["cli"].clear()
+        _tree_refs["endpoint"].clear()
+        _tree_refs["config"].clear()
         tree = state.build_tree_structure()
         theme = state.get_theme()
 
-        for cli_type in tree.keys():
+        for cli_type in tree:
             cli_name = CLI_TOOLS.get(cli_type, {}).get('name', cli_type)
-            cli_key = cli_type
-            is_cli_expanded = state.expanded_cli.get(cli_key, True)
-            is_cli_selected = state.selected_cli == cli_key and state.selected_endpoint is None and state.selected_config is None
+            is_exp = state.expanded_cli.get(cli_type, True)
+            is_sel = state.selected_cli == cli_type and state.selected_endpoint is None and state.selected_config is None
 
-            cli_header = ft.GestureDetector(
-                content=ft.Container(
-                    content=ft.Row([
-                        ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_cli_expanded else ft.Icons.ARROW_RIGHT, size=20, color=theme['text']),
-                        ft.Icon(ft.Icons.TERMINAL, color=theme['icon_cli']),
-                        ft.Text(cli_name, weight=ft.FontWeight.BOLD, color=theme['text_selected'] if is_cli_selected else theme['text']),
-                        ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=theme['text_sec']),
-                    ], spacing=5),
-                    padding=ft.padding.only(left=5, top=8, bottom=8),
-                    bgcolor=theme['selection_bg'] if is_cli_selected else theme['header_bg'],
-                    border_radius=4,
-                ),
-                on_tap=lambda e, k=cli_key: (state.select_cli(k), refresh_config_list(), page.update()),
-                on_double_tap=lambda e, k=cli_key: (state.toggle_cli(k), refresh_config_list(), page.update()),
+            cli_text = ft.Text(cli_name, weight=ft.FontWeight.BOLD, color=theme['text_selected'] if is_sel else theme['text'])
+            cli_container = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_exp else ft.Icons.ARROW_RIGHT, size=20, color=theme['text']),
+                    ft.Icon(ft.Icons.TERMINAL, color=theme['icon_cli']),
+                    cli_text,
+                    ft.Text(f"({sum(len(v) for v in tree[cli_type].values())})", color=theme['text_sec']),
+                ], spacing=5),
+                padding=ft.padding.only(left=5, top=8, bottom=8),
+                bgcolor=theme['selection_bg'] if is_sel else theme['header_bg'],
+                border_radius=4, ink=True,
+                on_click=lambda e, k=cli_type: _on_cli_click(k),
             )
-            config_tree.controls.append(cli_header)
+            _tree_refs["cli"][cli_type] = {"c": cli_container, "t": cli_text}
+            config_tree.controls.append(cli_container)
 
-            if is_cli_expanded:
-                for endpoint in tree[cli_type].keys():
-                    endpoint_key = f"{cli_type}:{endpoint}"
-                    is_endpoint_expanded = state.expanded_endpoint.get(endpoint_key, True)
-                    short_endpoint = endpoint[:40] + "..." if len(endpoint) > 40 else endpoint
-                    is_ep_selected = state.selected_endpoint == endpoint_key and state.selected_config is None
+            if is_exp:
+                for endpoint in tree[cli_type]:
+                    ep_key = f"{cli_type}:{endpoint}"
+                    ep_exp = state.expanded_endpoint.get(ep_key, True)
+                    short_ep = endpoint[:40] + "..." if len(endpoint) > 40 else endpoint
+                    ep_sel = state.selected_endpoint == ep_key and state.selected_config is None
 
-                    endpoint_header = ft.GestureDetector(
-                        content=ft.Container(
-                            content=ft.Row([
-                                ft.Icon(ft.Icons.ARROW_DROP_DOWN if is_endpoint_expanded else ft.Icons.ARROW_RIGHT, size=18, color=theme['text']),
-                                ft.Icon(ft.Icons.LINK, size=16, color=theme['icon_endpoint']),
-                                ft.Text(short_endpoint, size=13, color=theme['text_selected'] if is_ep_selected else theme['text']),
-                                ft.Text(f"({len(tree[cli_type][endpoint])})", color=theme['text_sec'], size=12),
-                            ], spacing=5),
-                            padding=ft.padding.only(left=30, top=6, bottom=6),
-                            bgcolor=theme['selection_bg'] if is_ep_selected else None,
-                            border_radius=4,
-                        ),
-                        on_tap=lambda e, k=endpoint_key: (state.select_endpoint(k), refresh_config_list(), page.update()),
-                        on_double_tap=lambda e, k=endpoint_key: (state.toggle_endpoint(k), refresh_config_list(), page.update()),
+                    ep_text = ft.Text(short_ep, size=13, color=theme['text_selected'] if ep_sel else theme['text'])
+                    ep_container = ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.ARROW_DROP_DOWN if ep_exp else ft.Icons.ARROW_RIGHT, size=18, color=theme['text']),
+                            ft.Icon(ft.Icons.LINK, size=16, color=theme['icon_endpoint']),
+                            ep_text,
+                            ft.Text(f"({len(tree[cli_type][endpoint])})", color=theme['text_sec'], size=12),
+                        ], spacing=5),
+                        padding=ft.padding.only(left=30, top=6, bottom=6),
+                        bgcolor=theme['selection_bg'] if ep_sel else None,
+                        border_radius=4, ink=True,
+                        on_click=lambda e, k=ep_key: _on_endpoint_click(k),
                     )
-                    config_tree.controls.append(endpoint_header)
+                    _tree_refs["endpoint"][ep_key] = {"c": ep_container, "t": ep_text}
+                    config_tree.controls.append(ep_container)
 
-                    if is_endpoint_expanded:
+                    if ep_exp:
                         for idx, cfg in tree[cli_type][endpoint]:
                             is_selected = state.selected_config == idx
-                            config_item = ft.GestureDetector(
-                                content=ft.Container(
-                                    content=ft.Row([
-                                        ft.Icon(ft.Icons.KEY, size=16, color=theme['icon_key_selected'] if is_selected else ft.Colors.GREY_600),
-                                        ft.Text(cfg.get('label', 'Unnamed'), weight=ft.FontWeight.BOLD if is_selected else None,
-                                               color=theme['text_selected'] if is_selected else theme['text']),
-                                    ], spacing=5),
-                                    padding=ft.padding.only(left=60, top=5, bottom=5),
-                                    bgcolor=theme['selection_bg'] if is_selected else None,
-                                    border_radius=4,
-                                ),
-                                on_tap=lambda e, i=idx: (state.select_config(i), refresh_config_list(), page.update()),
-                                on_double_tap=lambda e, i=idx: (state.select_config(i), show_config_dialog(i)),
+                            cfg_icon = ft.Icon(ft.Icons.KEY, size=16, color=theme['icon_key_selected'] if is_selected else ft.Colors.GREY_600)
+                            cfg_text = ft.Text(cfg.get('label', 'Unnamed'),
+                                               weight=ft.FontWeight.BOLD if is_selected else None,
+                                               color=theme['text_selected'] if is_selected else theme['text'])
+                            cfg_container = ft.Container(
+                                content=ft.Row([cfg_icon, cfg_text], spacing=5),
+                                padding=ft.padding.only(left=60, top=5, bottom=5),
+                                bgcolor=theme['selection_bg'] if is_selected else None,
+                                border_radius=4, ink=True,
+                                on_click=lambda e, i=idx: _on_config_click(i),
                             )
-                            config_tree.controls.append(config_item)
+                            _tree_refs["config"][idx] = {"c": cfg_container, "t": cfg_text, "i": cfg_icon}
+                            config_tree.controls.append(cfg_container)
         page.update()
 
     def show_config_dialog(idx):
@@ -346,7 +387,7 @@ def create_api_page(state):
                 state.configs.append(new_cfg)
             state.save_configs()
             refresh_config_list()
-            dlg.open = False
+            page.close(dlg)
             page.open(ft.SnackBar(ft.Text(L['saved'])))
             page.update()
 
@@ -364,13 +405,11 @@ def create_api_page(state):
                 ft.Row([max_tokens_field, token_limit_field]),
             ], tight=True, spacing=10, width=500),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+                ft.TextButton(L['cancel'], on_click=lambda e: page.close(dlg)),
                 ft.TextButton(L['save'], on_click=save_config),
             ],
         )
-        page.overlay.append(dlg)
-        dlg.open = True
-        page.update()
+        page.open(dlg)
 
     def add_config(e): show_config_dialog(None)
 
@@ -391,16 +430,13 @@ def create_api_page(state):
                     state.selected_config = None
                     refresh_config_list()
                     page.open(ft.SnackBar(ft.Text(L['deleted'])))
-                dlg.open = False
-                page.update()
+                page.close(dlg)
             dlg = ft.AlertDialog(
                 title=ft.Text(L['confirm_delete']),
                 content=ft.Text(L['confirm_delete_msg'].format(cfg.get('label', ''))),
                 actions=[ft.TextButton(L['cancel'], on_click=confirm_delete), ft.TextButton(L['delete'], on_click=confirm_delete)],
             )
-            page.overlay.append(dlg)
-            dlg.open = True
-            page.update()
+            page.open(dlg)
 
     def copy_config_key(e):
         if state.selected_config is not None:
@@ -576,15 +612,32 @@ def create_api_page(state):
         if selected_model:
             cli_cmd = f"{cli_cmd} --model {selected_model}"
         if sys.platform == 'win32':
-            # 构建设置环境变量的命令
-            set_cmds = [f'set {key_name}={api_key}']
-            if endpoint:
-                set_cmds.append(f'set {base_url_env}={endpoint}')
-            if selected_model:
+            # Gemini CLI 需要永久环境变量，其他 CLI 用临时变量
+            if cli_type == 'gemini':
+                # 用 setx 设置永久环境变量（不加引号）
+                setx_cmds = [f'setx {key_name} {api_key}']
+                if endpoint:
+                    setx_cmds.append(f'setx {base_url_env} {endpoint}')
                 model_env = cfg.get('provider', {}).get('model_env', '')
-                if model_env:
+                if selected_model and model_env:
+                    setx_cmds.append(f'setx {model_env} {selected_model}')
+                # 同时设置当前会话的临时变量
+                set_cmds = [f'set {key_name}={api_key}']
+                if endpoint:
+                    set_cmds.append(f'set {base_url_env}={endpoint}')
+                if selected_model and model_env:
                     set_cmds.append(f'set {model_env}={selected_model}')
-            full_cmd = ' && '.join(set_cmds + [cli_cmd])
+                full_cmd = ' && '.join(setx_cmds + set_cmds + [cli_cmd])
+            else:
+                # 其他 CLI 用临时环境变量
+                set_cmds = [f'set {key_name}={api_key}']
+                if endpoint:
+                    set_cmds.append(f'set {base_url_env}={endpoint}')
+                if selected_model:
+                    model_env = cfg.get('provider', {}).get('model_env', '')
+                    if model_env:
+                        set_cmds.append(f'set {model_env}={selected_model}')
+                full_cmd = ' && '.join(set_cmds + [cli_cmd])
             subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
             subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)

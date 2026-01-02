@@ -168,6 +168,8 @@ LANG = {
         'history_short_label': '短会话（≤3条且≤150字）: {}个',
         'history_old_label': '30天前会话: {}个',
         'history_empty_label': '空项目目录: {}个',
+        'custom': '自定义...',
+        'custom_model': '自定义模型',
     },
     'en': {
         'title': 'AI CLI Manager v{}',
@@ -337,5 +339,7 @@ LANG = {
         'history_short_label': 'Short sessions (≤3 msgs, ≤150 chars): {}',
         'history_old_label': 'Sessions over 30 days: {}',
         'history_empty_label': 'Empty project dirs: {}',
+        'custom': 'Custom...',
+        'custom_model': 'Custom Model',
     }
 }

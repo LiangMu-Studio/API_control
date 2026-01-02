@@ -34,7 +34,6 @@ class KeyModelManager:
         base_url = provider.get("endpoint")
         model = self.key_manager.get_model(config_id)
         provider_type = provider.get("type")
-        max_tokens = provider.get("max_tokens", 32000)
 
         service = self.service_factory.create_service(
             api_key=api_key,
@@ -121,7 +120,8 @@ class KeyModelManager:
             "anthropic": "https://api.anthropic.com",
             "glm": "https://open.bigmodel.cn/api/anthropic",
             "gemini": "https://generativelanguage.googleapis.com/v1beta",
-            "openai": "https://api.openai.com/v1"
+            "openai": "https://api.openai.com/v1",
+            "deepseek": "https://api.deepseek.com/v1",
         }
         return endpoints.get(provider_type, "")
 

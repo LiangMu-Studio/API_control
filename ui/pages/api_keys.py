@@ -11,7 +11,8 @@ import time
 
 from ..common import (
     THEMES, CLI_TOOLS, save_configs, save_settings,
-    detect_terminals, detect_python_envs, write_prompt_to_cli, detect_prompt_from_file
+    detect_terminals, detect_python_envs, write_prompt_to_cli, detect_prompt_from_file,
+    show_snackbar
 )
 
 # 辅助函数：从配置获取 cli_type（兼容新旧格式）
@@ -24,7 +25,7 @@ PROVIDER_DEFAULTS = {
     'openai': {
         'endpoint': 'https://api.openai.com/v1',
         'key_name': 'OPENAI_API_KEY',
-        'available_models': ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
+        'available_models': ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'gpt-5', 'gpt-5.1-codex-max'],
         'default_model': 'gpt-4o'
     },
     'anthropic': {
@@ -271,6 +272,7 @@ def create_api_page(state):
 
         # 模型下拉
         model_dropdown = ft.Dropdown(label=L.get('model', '模型'), expand=True)
+        custom_model_field = ft.TextField(label=L.get('custom_model', '自定义模型'), expand=True, visible=False)
 
         endpoint_field = ft.TextField(
             label=L['api_addr'], value=provider_data.get('endpoint', PROVIDER_DEFAULTS['anthropic']['endpoint']), expand=True,
@@ -309,7 +311,14 @@ def create_api_page(state):
                     options.append(ft.dropdown.Option(key=m.get('name', ''), text=m.get('label', m.get('name', ''))))
                 else:
                     options.append(ft.dropdown.Option(key=m, text=m))
+            options.append(ft.dropdown.Option(key='__custom__', text=L.get('custom', '自定义...')))
             return options
+
+        def on_model_change(e):
+            custom_model_field.visible = (model_dropdown.value == '__custom__')
+            page.update()
+
+        model_dropdown.on_change = on_model_change
 
         def on_provider_change(e):
             provider = provider_dropdown.value
@@ -321,6 +330,8 @@ def create_api_page(state):
                 model_dropdown.value = defaults['default_model']
             else:
                 model_dropdown.value = None
+            custom_model_field.visible = False
+            custom_model_field.value = ''
             page.update()
 
         def on_cli_change(e):
@@ -338,18 +349,24 @@ def create_api_page(state):
         model_dropdown.options = build_model_options(init_provider)
         saved_model = provider_data.get('selected_model')
         if saved_model:
-            model_dropdown.value = saved_model
+            # 检查是否在预设列表中
+            preset_keys = [opt.key for opt in model_dropdown.options if opt.key != '__custom__']
+            if saved_model in preset_keys:
+                model_dropdown.value = saved_model
+            else:
+                model_dropdown.value = '__custom__'
+                custom_model_field.value = saved_model
+                custom_model_field.visible = True
         elif PROVIDER_DEFAULTS.get(init_provider, {}).get('default_model'):
             model_dropdown.value = PROVIDER_DEFAULTS[init_provider]['default_model']
 
         def save_config(e):
             if not name_field.value or not api_key_field.value:
-                page.open(ft.SnackBar(ft.Text(L['fill_required'])))
-                page.update()
+                show_snackbar(page, L['fill_required'])
                 return
 
             provider_type = provider_dropdown.value
-            selected_model = model_dropdown.value
+            selected_model = custom_model_field.value if model_dropdown.value == '__custom__' else model_dropdown.value
 
             # 获取GLM的thinking_mode
             thinking_mode = None
@@ -398,8 +415,7 @@ def create_api_page(state):
             state.save_configs()
             refresh_config_list()
             page.close(dlg)
-            page.open(ft.SnackBar(ft.Text(L['saved'])))
-            page.update()
+            show_snackbar(page, L['saved'])
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
@@ -408,6 +424,7 @@ def create_api_page(state):
                 ft.Row([cli_dropdown, provider_dropdown]),
                 model_env_field,
                 model_dropdown,
+                custom_model_field,
                 base_url_env_field,
                 endpoint_field,
                 key_name_field,
@@ -427,7 +444,7 @@ def create_api_page(state):
         if state.selected_config is not None:
             show_config_dialog(state.selected_config)
         else:
-            page.open(ft.SnackBar(ft.Text(L['no_selection'])))
+            show_snackbar(page, L['no_selection'])
             page.update()
 
     def delete_config(e):
@@ -439,7 +456,7 @@ def create_api_page(state):
                     state.save_configs()
                     state.selected_config = None
                     refresh_config_list()
-                    page.open(ft.SnackBar(ft.Text(L['deleted'])))
+                    show_snackbar(page, L['deleted'])
                 page.close(dlg)
             dlg = ft.AlertDialog(
                 title=ft.Text(L['confirm_delete']),
@@ -452,8 +469,7 @@ def create_api_page(state):
         if state.selected_config is not None:
             key = state.configs[state.selected_config].get('provider', {}).get('credentials', {}).get('api_key', '')
             page.set_clipboard(key)
-            page.open(ft.SnackBar(ft.Text(L['copied'])))
-            page.update()
+            show_snackbar(page, L['copied'])
 
     def move_up(e):
         if state.selected_config is not None:
@@ -534,8 +550,7 @@ def create_api_page(state):
             if result.path:
                 with open(result.path, 'w', encoding='utf-8') as f:
                     json.dump({'configs': state.configs}, f, ensure_ascii=False, indent=2)
-                page.open(ft.SnackBar(ft.Text(L['exported_to'].format(result.path))))
-                page.update()
+                show_snackbar(page, L['exported_to'].format(result.path))
         picker = ft.FilePicker(on_result=on_result)
         page.overlay.append(picker)
         page.update()
@@ -551,10 +566,9 @@ def create_api_page(state):
                     state.configs.extend(imported)
                     state.save_configs()
                     refresh_config_list()
-                    page.open(ft.SnackBar(ft.Text(L['imported_count'].format(len(imported)))))
+                    show_snackbar(page, L['imported_count'].format(len(imported)))
                 except Exception as ex:
-                    page.open(ft.SnackBar(ft.Text(str(ex))))
-                page.update()
+                    show_snackbar(page, str(ex))
         picker = ft.FilePicker(on_result=on_result)
         page.overlay.append(picker)
         page.update()
@@ -570,7 +584,7 @@ def create_api_page(state):
         picker = ft.FilePicker(on_result=on_result)
         page.overlay.append(picker)
         page.update()
-        picker.get_directory_path()
+        picker.get_directory_path(initial_directory=work_dir_field.value or None)
 
     def refresh_terminals_click(e):
         state.terminals = detect_terminals()
@@ -579,8 +593,7 @@ def create_api_page(state):
         terminal_dropdown.options = [ft.dropdown.Option(k) for k in state.terminals.keys()]
         if state.terminals:
             terminal_dropdown.value = list(state.terminals.keys())[0]
-        page.open(ft.SnackBar(ft.Text(L['terminals_refreshed'])))
-        page.update()
+        show_snackbar(page, L['terminals_refreshed'])
 
     def refresh_envs_click(e):
         state.python_envs = detect_python_envs()
@@ -589,12 +602,11 @@ def create_api_page(state):
         python_env_dropdown.options = [ft.dropdown.Option(k) for k in state.python_envs.keys()]
         if state.python_envs:
             python_env_dropdown.value = list(state.python_envs.keys())[0]
-        page.open(ft.SnackBar(ft.Text(L['envs_refreshed'].format(len(state.python_envs)))))
-        page.update()
+        show_snackbar(page, L['envs_refreshed'].format(len(state.python_envs)))
 
     def open_terminal(e):
         if state.selected_config is None:
-            page.open(ft.SnackBar(ft.Text(L['no_selection'])))
+            show_snackbar(page, L['no_selection'])
             page.update()
             return
         cfg = state.configs[state.selected_config]
@@ -652,14 +664,12 @@ def create_api_page(state):
         else:
             subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)
 
-    def apply_selected_prompt(e):
+    def apply_selected_prompt(e=None):
+        """应用选中的提示词"""
         if not prompt_dropdown.value:
-            page.open(ft.SnackBar(ft.Text(L['no_selection'])))
-            page.update()
             return
         if not work_dir_field.value:
-            page.open(ft.SnackBar(ft.Text(L['prompt_select_workdir'])))
-            page.update()
+            show_snackbar(page, L['prompt_select_workdir'])
             return
         cli_type = 'claude'
         if state.selected_config is not None:
@@ -671,10 +681,206 @@ def create_api_page(state):
         user_id = prompt_dropdown.value
         try:
             file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_field.value)
-            page.open(ft.SnackBar(ft.Text(L['prompt_written'].format(file_path))))
+            show_snackbar(page, L['prompt_written'].format(file_path))
         except Exception as ex:
-            page.open(ft.SnackBar(ft.Text(L['prompt_write_fail'].format(ex))))
-        page.update()
+            show_snackbar(page, L['prompt_write_fail'].format(ex))
+
+    def on_prompt_change(e):
+        """提示词选择变化时自动应用"""
+        apply_selected_prompt()
+
+    prompt_dropdown.on_change = on_prompt_change
+
+    # MCP 服务器选择状态
+    selected_mcp_servers = set()
+    for m in state.mcp_list:
+        if m.get('is_default'):
+            selected_mcp_servers.add(m.get('name', ''))
+
+    def show_mcp_selector(e):
+        """显示 MCP 服务器选择弹窗"""
+        mcp_checkboxes = []
+
+        def toggle_mcp(name, checked):
+            if checked:
+                selected_mcp_servers.add(name)
+            else:
+                selected_mcp_servers.discard(name)
+
+        def save_mcp_selection(e):
+            # 更新 mcp_list 中的 is_default 状态
+            for m in state.mcp_list:
+                m['is_default'] = m.get('name', '') in selected_mcp_servers
+            state.save_mcp()
+            # 同步到全局配置
+            from ..pages.mcp import create_mcp_page
+            global_mcp_path = Path.home() / '.claude' / '.mcp.json'
+            global_mcp_path.parent.mkdir(parents=True, exist_ok=True)
+            mcp_servers = {}
+            for m in state.mcp_list:
+                if m.get('is_default'):
+                    server_config = {'command': m.get('command', 'npx')}
+                    if m.get('args'):
+                        server_config['args'] = m['args'].split()
+                    if m.get('env'):
+                        env_dict = {}
+                        for part in m['env'].split():
+                            if '=' in part:
+                                k, v = part.split('=', 1)
+                                env_dict[k] = v
+                        if env_dict:
+                            server_config['env'] = env_dict
+                    mcp_servers[m.get('name', '').lower().replace(' ', '-')] = server_config
+            import json
+            with open(global_mcp_path, 'w', encoding='utf-8') as f:
+                json.dump({'mcpServers': mcp_servers}, f, indent=2, ensure_ascii=False)
+            page.close(dlg)
+            show_snackbar(page, L.get('mcp_saved', 'MCP 配置已保存'))
+
+        # 按分类组织
+        by_cat = {}
+        for m in state.mcp_list:
+            cat = m.get('category', '其他')
+            if cat not in by_cat:
+                by_cat[cat] = []
+            by_cat[cat].append(m)
+
+        content_controls = []
+        for cat, items in by_cat.items():
+            content_controls.append(ft.Text(cat, weight=ft.FontWeight.BOLD, size=12, color=ft.Colors.GREY_600))
+            for m in items:
+                name = m.get('name', '')
+                cb = ft.Checkbox(
+                    label=name,
+                    value=name in selected_mcp_servers,
+                    on_change=lambda e, n=name: toggle_mcp(n, e.control.value)
+                )
+                mcp_checkboxes.append(cb)
+                content_controls.append(cb)
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('mcp_select', 'MCP 服务器')),
+            content=ft.Container(
+                ft.Column(content_controls, scroll=ft.ScrollMode.AUTO, spacing=5),
+                width=300, height=400
+            ),
+            actions=[
+                ft.TextButton(L['cancel'], on_click=lambda e: page.close(dlg)),
+                ft.ElevatedButton(L['save'], on_click=save_mcp_selection),
+            ],
+        )
+        page.open(dlg)
+
+    # 截图功能
+    def take_screenshot(e):
+        """启动截图工具 - 使用子进程避免线程问题"""
+        import subprocess
+        import threading
+        import time as _time
+
+        save_dir = work_dir_field.value or str(Path.cwd() / "screenshots")
+        script = str(Path(__file__).parent.parent / "tools" / "screenshot_tool.py")
+
+        # 清理一周前的截图
+        def cleanup_old():
+            try:
+                d = Path(save_dir)
+                if d.exists():
+                    week_ago = _time.time() - 7 * 86400
+                    for f in d.glob("screenshot_*.png"):
+                        if f.stat().st_mtime < week_ago:
+                            f.unlink()
+            except Exception:
+                pass
+
+        def run():
+            cleanup_old()
+            result = subprocess.run(
+                [sys.executable, script, save_dir],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                path = result.stdout.strip()
+                if path and Path(path).exists():
+                    page.set_clipboard(path)
+                    show_snackbar(page, L.get('screenshot_saved', f'截图已保存: {path}'))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # 快捷键设置
+    from ..hotkey import load_hotkey, update_hotkey
+
+    def format_hotkey(hk: str) -> str:
+        """格式化快捷键显示：alt+s -> Alt+S"""
+        return '+'.join(p.capitalize() for p in hk.split('+'))
+
+    current_hotkey_display = format_hotkey(load_hotkey())
+    hotkey_btn = ft.OutlinedButton(f"快捷键 {current_hotkey_display}", on_click=lambda e: show_hotkey_dialog(e), width=140)
+
+    def show_hotkey_dialog(e):
+        """显示快捷键设置对话框"""
+        try:
+            import keyboard as kb
+        except ImportError:
+            show_snackbar(page, "需要安装 keyboard 库")
+            return
+
+        captured_keys = []
+        current_hk = format_hotkey(load_hotkey())
+        key_display = ft.Text("请按下快捷键...", size=16, weight=ft.FontWeight.BOLD)
+        hook_id = [None]
+
+        def on_key(event):
+            if event.event_type != 'down':
+                return
+            parts = []
+            if kb.is_pressed('ctrl'):
+                parts.append("Ctrl")
+            if kb.is_pressed('alt'):
+                parts.append("Alt")
+            if kb.is_pressed('shift'):
+                parts.append("Shift")
+            key = event.name
+            if key and key.lower() not in ('ctrl', 'alt', 'shift', 'left ctrl', 'right ctrl', 'left alt', 'right alt', 'left shift', 'right shift'):
+                parts.append(key.upper() if len(key) == 1 else key.capitalize())
+            if parts:
+                captured_keys.clear()
+                captured_keys.extend(parts)
+                key_display.value = "+".join(parts)
+                page.update()
+
+        hook_id[0] = kb.hook(on_key)
+
+        def save_key(e):
+            if hook_id[0]:
+                kb.unhook(hook_id[0])
+            if captured_keys:
+                new_key = "+".join(p.lower() for p in captured_keys)
+                update_hotkey(new_key, work_dir_field.value)
+                hotkey_btn.text = f"快捷键 {'+'.join(captured_keys)}"
+                show_snackbar(page, f'快捷键已设置: {"+".join(captured_keys)}')
+            page.close(dlg)
+
+        def cancel(e):
+            if hook_id[0]:
+                kb.unhook(hook_id[0])
+            page.close(dlg)
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("设置截图快捷键"),
+            content=ft.Container(
+                ft.Column([
+                    ft.Text(f"当前快捷键为：{current_hk}", size=14),
+                    key_display,
+                ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                width=250, height=80,
+            ),
+            actions=[
+                ft.TextButton(L['cancel'], on_click=cancel),
+                ft.ElevatedButton(L['save'], on_click=save_key),
+            ],
+        )
+        page.open(dlg)
 
     # 初始化列表
     refresh_config_list()
@@ -705,7 +911,12 @@ def create_api_page(state):
         ], wrap=True, spacing=5),
         ft.Row([work_dir_field, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
                 ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
-        ft.Row([prompt_dropdown, ft.ElevatedButton(L['prompt_apply'], icon=ft.Icons.SEND, on_click=apply_selected_prompt)]),
+        ft.Row([
+            prompt_dropdown,
+            ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),
+            ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, on_click=take_screenshot, width=100, tooltip="截图保留一周"),
+            hotkey_btn,
+        ], spacing=10),
     ], expand=True, spacing=10)
 
     return api_page, refresh_config_list

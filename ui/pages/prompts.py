@@ -1,7 +1,7 @@
 # AI CLI Manager - Prompts Page
 import flet as ft
 from datetime import datetime
-from ..common import THEMES
+from ..common import THEMES, show_snackbar
 
 
 def create_prompts_page(state):
@@ -16,6 +16,15 @@ def create_prompts_page(state):
         label=L['prompt_global'], multiline=True, min_lines=4,
         value=system_prompt.get('content', '') if system_prompt else '', border_radius=8,
     )
+    global_icon = ft.Icon(ft.Icons.PUBLIC, color=theme['global_icon'])
+    global_container = ft.Container(
+        content=ft.Column([
+            ft.Row([global_icon, ft.Text(L['prompt_global'], size=16, weight=ft.FontWeight.BOLD)], spacing=5),
+            global_prompt_content,
+            ft.Row([ft.ElevatedButton(L['prompt_save_global'], icon=ft.Icons.SAVE, on_click=lambda e: save_global_prompt(e))]),
+        ], spacing=5),
+        padding=10, border=ft.border.all(1, theme['global_border']), border_radius=8, bgcolor=theme['global_bg'],
+    )
     prompt_content = ft.TextField(
         label=L['prompt_content'], multiline=True, min_lines=12, expand=True, border_radius=8,
     )
@@ -28,8 +37,7 @@ def create_prompts_page(state):
             system_prompt = {'id': 'system_global', 'name': L['prompt_global'], 'prompt_type': 'system', 'category': L['prompt_global']}
         system_prompt['content'] = global_prompt_content.value or ''
         state.prompt_db.save(system_prompt)
-        state.page.open(ft.SnackBar(ft.Text(L['prompt_global_saved'])))
-        state.page.update()
+        show_snackbar(state.page, L['prompt_global_saved'])
 
     def build_prompt_tree():
         tree = {}
@@ -47,6 +55,10 @@ def create_prompts_page(state):
         prompt_tree.controls.clear()
         tree = build_prompt_tree()
         theme = state.get_theme()
+        # 更新全局提示词容器样式
+        global_container.bgcolor = theme['global_bg']
+        global_container.border = ft.border.all(1, theme['global_border'])
+        global_icon.color = theme['global_icon']
         for cat, items in tree.items():
             is_expanded = expanded_categories.get(cat, True)
             cat_header = ft.Container(
@@ -100,8 +112,7 @@ def create_prompts_page(state):
         if selected_prompt and not state.prompts.get(selected_prompt, {}).get('is_builtin'):
             show_prompt_dialog(selected_prompt)
         elif selected_prompt:
-            state.page.open(ft.SnackBar(ft.Text(L['prompt_builtin_readonly'])))
-            state.page.update()
+            show_snackbar(state.page, L['prompt_builtin_readonly'])
 
     def delete_prompt(e):
         nonlocal selected_prompt
@@ -115,15 +126,13 @@ def create_prompts_page(state):
     def copy_prompt(e):
         if selected_prompt:
             state.page.set_clipboard(state.prompts[selected_prompt].get('content', ''))
-            state.page.open(ft.SnackBar(ft.Text(L['copied'])))
-            state.page.update()
+            show_snackbar(state.page, L['copied'])
 
     def save_prompt_content(e):
         if selected_prompt and not state.prompts.get(selected_prompt, {}).get('is_builtin'):
             state.prompts[selected_prompt]['content'] = prompt_content.value or ''
             state.prompt_db.save(state.prompts[selected_prompt])
-            state.page.open(ft.SnackBar(ft.Text(L['saved'])))
-            state.page.update()
+            show_snackbar(state.page, L['saved'])
 
     def show_prompt_dialog(pid):
         is_edit = pid is not None
@@ -164,17 +173,7 @@ def create_prompts_page(state):
         state.page.update()
 
     prompt_page = ft.Column([
-        ft.Container(
-            content=ft.Column([
-                ft.Row([
-                    ft.Icon(ft.Icons.PUBLIC, color=theme['global_icon']),
-                    ft.Text(L['prompt_global'], size=16, weight=ft.FontWeight.BOLD),
-                ], spacing=5),
-                global_prompt_content,
-                ft.Row([ft.ElevatedButton(L['prompt_save_global'], icon=ft.Icons.SAVE, on_click=save_global_prompt)]),
-            ], spacing=5),
-            padding=10, border=ft.border.all(1, theme['global_border']), border_radius=8, bgcolor=theme['global_bg'],
-        ),
+        global_container,
         ft.Divider(),
         ft.Row([
             ft.Text(L['prompt_user'], size=16, weight=ft.FontWeight.BOLD),

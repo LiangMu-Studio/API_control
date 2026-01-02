@@ -3,7 +3,7 @@ import flet as ft
 import json
 import threading
 from pathlib import Path
-from ..common import THEMES, OFFICIAL_MCP_SERVERS, MCP_MARKETPLACES, save_mcp
+from ..common import THEMES, OFFICIAL_MCP_SERVERS, MCP_MARKETPLACES, save_mcp, show_snackbar
 from ..database import mcp_registry
 
 
@@ -193,8 +193,7 @@ def create_mcp_page(state):
             state.save_mcp()
             refresh_mcp_tree()
             dlg.open = False
-            state.page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(1))))
-            state.page.update()
+            show_snackbar(state.page, L['mcp_added'].format(1))
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_select_official']),
@@ -245,8 +244,7 @@ def create_mcp_page(state):
             try:
                 clip = await state.page.get_clipboard_async()
                 if not clip:
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_clipboard_empty'])))
-                    state.page.update()
+                    show_snackbar(state.page, L['mcp_clipboard_empty'])
                     return
                 data = json.loads(clip)
                 items = parse_mcp_json(data)
@@ -254,13 +252,13 @@ def create_mcp_page(state):
                     state.mcp_list.extend(items)
                     state.save_mcp()
                     refresh_mcp_tree()
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
+                    show_snackbar(state.page, L['mcp_added'].format(len(items)))
                 else:
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
+                    show_snackbar(state.page, L['mcp_no_valid_config'])
             except json.JSONDecodeError:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_invalid_json'])))
+                show_snackbar(state.page, L['mcp_invalid_json'])
             except Exception as ex:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
+                show_snackbar(state.page, L['mcp_import_fail'].format(ex))
             state.page.update()
         state.page.run_task(do_import)
 
@@ -276,11 +274,11 @@ def create_mcp_page(state):
                     state.mcp_list.extend(items)
                     state.save_mcp()
                     refresh_mcp_tree()
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
+                    show_snackbar(state.page, L['mcp_added'].format(len(items)))
                 else:
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
+                    show_snackbar(state.page, L['mcp_no_valid_config'])
             except Exception as ex:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
+                show_snackbar(state.page, L['mcp_import_fail'].format(ex))
             state.page.update()
         picker = ft.FilePicker(on_result=on_result)
         state.page.overlay.append(picker)
@@ -299,13 +297,13 @@ def create_mcp_page(state):
                     state.save_mcp()
                     refresh_mcp_tree()
                     dlg.open = False
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(len(items)))))
+                    show_snackbar(state.page, L['mcp_added'].format(len(items)))
                 else:
-                    state.page.open(ft.SnackBar(ft.Text(L['mcp_no_valid_config'])))
+                    show_snackbar(state.page, L['mcp_no_valid_config'])
             except json.JSONDecodeError:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_invalid_json'])))
+                show_snackbar(state.page, L['mcp_invalid_json'])
             except Exception as ex:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_import_fail'].format(ex))))
+                show_snackbar(state.page, L['mcp_import_fail'].format(ex))
             state.page.update()
 
         dlg = ft.AlertDialog(
@@ -373,7 +371,7 @@ def create_mcp_page(state):
             if errors:
                 mcp_fetch_log.extend(errors)
             if stats['total'] > 0:
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_sync_complete'].format(stats['total'], new_count))))
+                show_snackbar(state.page, L['mcp_sync_complete'].format(stats['total'], new_count))
                 show_repository_browser(stats)
             else:
                 show_sync_debug()
@@ -464,7 +462,7 @@ def create_mcp_page(state):
                 state.save_mcp()
                 refresh_mcp_tree()
                 dlg.open = False
-                state.page.open(ft.SnackBar(ft.Text(L['mcp_added'].format(added))))
+                show_snackbar(state.page, L['mcp_added'].format(added))
             state.page.update()
 
         search_field.on_change = filter_list

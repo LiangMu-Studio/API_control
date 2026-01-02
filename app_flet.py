@@ -29,6 +29,7 @@ if sys.platform == 'win32':
         sys.exit(0)
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs
+from ui.theme_manager import ThemeManager
 
 # 获取图标路径（兼容打包后）
 if getattr(sys, 'frozen', False):
@@ -37,6 +38,7 @@ else:
     BASE_DIR = Path(__file__).parent
 ICON_PATH = str(BASE_DIR / "icon.ico")
 from ui.database import history_manager, codex_history_manager, history_cache
+from ui.hotkey import setup_screenshot_hotkey
 from ui.pages.api_keys import create_api_page
 from ui.pages.prompts import create_prompts_page
 from ui.pages.mcp import create_mcp_page
@@ -48,6 +50,7 @@ def main(page: ft.Page):
     page.window.width = 1200
     page.window.height = 800
     page.padding = 0
+    page.theme = ft.Theme(font_family="SimSun")
     page.window.icon = ICON_PATH
     page.window.title_bar_hidden = True
     page.window.title_bar_buttons_hidden = True
@@ -56,6 +59,9 @@ def main(page: ft.Page):
     state = AppState(page)
     L = state.L
     theme = state.get_theme()
+
+    # 初始化主题管理器
+    theme_mgr = ThemeManager(state, page)
 
     page.bgcolor = theme['bg']
     page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
@@ -78,12 +84,19 @@ def main(page: ft.Page):
             padding=ft.padding.only(left=10, right=5, top=5, bottom=5),
         )
     )
+    theme_mgr.set_title_bar(title_bar)
 
     # 创建页面
     api_page, refresh_api = create_api_page(state)
     prompt_page, refresh_prompts = create_prompts_page(state)
     mcp_page, refresh_mcp = create_mcp_page(state)
     history_page, refresh_history = create_history_page(state)
+
+    # 注册页面刷新回调
+    theme_mgr.register_page(0, refresh_api)
+    theme_mgr.register_page(1, refresh_prompts)
+    theme_mgr.register_page(2, refresh_mcp)
+    theme_mgr.register_page(3, refresh_history)
 
     current_page_idx = [0]
     content_area = ft.Container(api_page, expand=True, padding=20)
@@ -107,26 +120,8 @@ def main(page: ft.Page):
         content_area.bgcolor = t["surface"]
         page.update()
 
-    def refresh_title_bar():
-        t = state.get_theme()
-        container = title_bar.content
-        container.bgcolor = t["surface"]
-        for ctrl in container.content.controls:
-            if isinstance(ctrl, ft.Icon):
-                ctrl.color = t["text"]
-            elif isinstance(ctrl, ft.Text):
-                ctrl.color = t["text"]
-            elif isinstance(ctrl, ft.IconButton):
-                ctrl.icon_color = t["text_sec"]
-
     def toggle_theme(_):
-        state.toggle_theme()
-        page.bgcolor = state.get_theme()['bg']
-        page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
-        refresh_title_bar()
-        refresh_api()
-        refresh_prompts()
-        page.update()
+        theme_mgr.toggle(current_page_idx[0])
 
     def switch_lang(_):
         w, h, x, y = page.window.width, page.window.height, page.window.left, page.window.top
@@ -141,10 +136,12 @@ def main(page: ft.Page):
     def open_feedback(_):
         page.launch_url("https://github.com/LiangMu-Studio/AI_CLI_Manager/issues")
 
+    divider = ft.VerticalDivider(width=1, color=theme["border"])
     nav_rail = ft.NavigationRail(
         selected_index=0,
         label_type=ft.NavigationRailLabelType.ALL,
         min_width=100,
+        bgcolor=theme["surface"],
         destinations=[
             ft.NavigationRailDestination(icon=ft.Icons.KEY, label=L['api_config']),
             ft.NavigationRailDestination(icon=ft.Icons.CHAT, label=L['prompts']),
@@ -162,7 +159,10 @@ def main(page: ft.Page):
         ),
     )
 
-    main_content = ft.Row([nav_rail, ft.VerticalDivider(width=1), content_area], expand=True)
+    # 注册布局组件到主题管理器
+    theme_mgr.set_layout(content_area, nav_rail, divider)
+
+    main_content = ft.Row([nav_rail, divider, content_area], expand=True)
     page.add(ft.Column([title_bar, main_content], spacing=0, expand=True))
     refresh_api()
 
@@ -174,6 +174,9 @@ def main(page: ft.Page):
         if codex_history_manager:
             history_cache["codex"] = await loop.run_in_executor(None, codex_history_manager.load_sessions)
     page.run_task(preload_history)
+
+    # 注册截图快捷键 Ctrl+Alt+A
+    setup_screenshot_hotkey()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 import flet as ft
 from datetime import datetime, timedelta
 from pathlib import Path
-from ..common import THEMES, TRASH_RETENTION_DAYS
+from ..common import THEMES, TRASH_RETENTION_DAYS, show_snackbar
 from ..database import history_manager, codex_history_manager, history_cache
 
 
@@ -164,7 +164,7 @@ def create_history_page(state):
 
     def copy_cb(t):
         state.page.set_clipboard(t)
-        state.page.open(ft.SnackBar(ft.Text(L['history_copied'].format(t[:50]))))
+        show_snackbar(state.page, L['history_copied'].format(t[:50]))
 
     def show_detail(d):
         history_detail.controls.clear()
@@ -194,7 +194,7 @@ def create_history_page(state):
             for d in data:
                 if mgr.delete_session(d['group'], d['session_id'], d['info']): cnt += 1
             history_cache[current_cli] = {}
-            state.page.open(ft.SnackBar(ft.Text(L['history_moved'].format(cnt))))
+            show_snackbar(state.page, L['history_moved'].format(cnt))
             refresh_history_tree()
         dlg = ft.AlertDialog(title=ft.Text(L['confirm_delete']), content=ft.Text(L['history_confirm_delete'].format(len(data), TRASH_RETENTION_DAYS)), actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update()), ft.TextButton(L['delete'], on_click=do_del)])
         state.page.overlay.append(dlg)

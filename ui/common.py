@@ -21,6 +21,11 @@ import threading
 DEBUG = False
 TRASH_RETENTION_DAYS = 7
 
+def show_snackbar(page, text, duration=1000):
+    """显示 SnackBar 提示，默认 1 秒后自动关闭"""
+    page.open(ft.SnackBar(ft.Text(text), duration=duration))
+    page.update()
+
 # ========== 主题配置 ==========
 THEMES = {
     "light": {

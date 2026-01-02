@@ -353,8 +353,12 @@ class KeyManager:
                 return 'glm'
             if 'generativelanguage.googleapis.com' in endpoint:
                 return 'gemini'
+            if 'deepseek.com' in endpoint:
+                return 'deepseek'
             if 'api.anthropic.com' in endpoint:
                 return 'anthropic'
+            if 'openai.com' in endpoint:
+                return 'openai'
 
         # 优先级 2: 根据 api_key
         if api_key.startswith('cr_'):
@@ -363,7 +367,7 @@ class KeyManager:
             return 'anthropic'
         if api_key.startswith('AIza'):
             return 'gemini'
-        if api_key.startswith('glm-') or 'zhipu' in api_key.lower():
-            return 'glm'
+        if api_key.startswith('sk-'):
+            return 'openai'
 
         return 'anthropic'  # 默认

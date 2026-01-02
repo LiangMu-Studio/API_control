@@ -49,3 +49,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# exe
+LiangMu-API-Key.exe

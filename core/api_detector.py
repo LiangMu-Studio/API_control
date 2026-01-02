@@ -13,6 +13,7 @@ class APIType(Enum):
     GLM = "glm"
     GEMINI = "gemini"
     OPENAI = "openai"
+    DEEPSEEK = "deepseek"
     UNKNOWN = "unknown"
 
 
@@ -40,6 +41,8 @@ class APIDetector:
                 return APIType.GLM
             if 'generativelanguage.googleapis.com' in endpoint:
                 return APIType.GEMINI
+            if 'deepseek.com' in endpoint:
+                return APIType.DEEPSEEK
             if 'api.anthropic.com' in endpoint:
                 return APIType.STANDARD_ANTHROPIC
 
@@ -63,6 +66,7 @@ class APIDetector:
                 "glm": APIType.GLM,
                 "gemini": APIType.GEMINI,
                 "openai": APIType.OPENAI,
+                "deepseek": APIType.DEEPSEEK,
             }
             if provider_type in type_map:
                 return type_map[provider_type]
@@ -76,7 +80,7 @@ class APIDetector:
             return {"x-api-key": api_key}
         elif api_type == APIType.GEMINI:
             return {"x-goog-api-key": api_key}
-        elif api_type == APIType.OPENAI:
+        elif api_type in (APIType.OPENAI, APIType.DEEPSEEK):
             return {"Authorization": f"Bearer {api_key}"}
         else:
             return {"Authorization": f"Bearer {api_key}"}
@@ -87,8 +91,9 @@ class APIDetector:
         endpoints = {
             APIType.CLAUDE_CODE: "https://api.anthropic.com/v1/messages",
             APIType.STANDARD_ANTHROPIC: "https://api.anthropic.com/v1/messages",
-            APIType.GLM: "https://open.bigmodel.cn/api/anthropic/v1/messages",
+            APIType.GLM: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
             APIType.GEMINI: "https://generativelanguage.googleapis.com/v1beta/models",
             APIType.OPENAI: "https://api.openai.com/v1/chat/completions",
+            APIType.DEEPSEEK: "https://api.deepseek.com/v1/chat/completions",
         }
         return endpoints.get(api_type, "https://api.anthropic.com/v1/messages")

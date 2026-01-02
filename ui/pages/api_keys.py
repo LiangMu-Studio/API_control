@@ -14,6 +14,7 @@ from ..common import (
     detect_terminals, detect_python_envs, write_prompt_to_cli, detect_prompt_from_file,
     show_snackbar
 )
+from ..clipboard_paste import enable_clipboard_paste
 
 # 辅助函数：从配置获取 cli_type（兼容新旧格式）
 def get_cli_type(cfg):
@@ -336,6 +337,17 @@ def create_api_page(state):
             label=L['api_key'], value=provider_data.get('credentials', {}).get('api_key', ''),
             password=True, can_reveal_password=True, expand=True,
         )
+        quota_url_field = ft.TextField(
+            label=L.get('quota_url', '流量查询地址'), value=provider_data.get('quota_url', ''), expand=True,
+            keyboard_type=ft.KeyboardType.URL,
+        )
+        enable_clipboard_paste(quota_url_field)
+
+        def open_quota_url(e):
+            if quota_url_field.value:
+                page.set_clipboard(api_key_field.value)
+                page.launch_url(quota_url_field.value)
+        quota_btn = ft.IconButton(ft.Icons.OPEN_IN_NEW, tooltip=L.get('check_quota', '查询'), on_click=open_quota_url)
         max_tokens_field = ft.TextField(
             label=L.get('max_tokens', '单次响应最大'), value=str(provider_data.get('max_tokens', 32000)), expand=True,
         )
@@ -443,6 +455,7 @@ def create_api_page(state):
                     'available_models': [selected_model] if selected_model else [],
                     'max_tokens': max_tokens,
                     'token_limit_per_request': token_limit,
+                    'quota_url': quota_url_field.value,
                 },
                 'createdAt': cfg.get('createdAt', datetime.now().isoformat()),
                 'updatedAt': datetime.now().isoformat(),
@@ -471,6 +484,7 @@ def create_api_page(state):
                 endpoint_field,
                 key_name_field,
                 api_key_field,
+                ft.Row([quota_url_field, quota_btn]),
                 ft.Row([max_tokens_field, token_limit_field]),
             ], tight=True, spacing=10, width=500),
             actions=[

@@ -32,68 +32,11 @@ def create_tray_icon(state, on_show_window, on_quit):
 
     def build_menu():
         """构建托盘菜单"""
-        items = [pystray.MenuItem("显示窗口", lambda: on_show_window())]
-
-        # 添加配置快速启动
-        configs = state.configs if hasattr(state, 'configs') else []
-        if configs:
-            items.append(pystray.Menu.SEPARATOR)
-            # 最多显示 10 个配置
-            for i, cfg in enumerate(configs[:10]):
-                label = cfg.get('label', f'配置 {i+1}')
-                items.append(pystray.MenuItem(
-                    f"▶ {label}",
-                    lambda _, idx=i: quick_launch(state, idx)
-                ))
-
-        items.append(pystray.Menu.SEPARATOR)
-        items.append(pystray.MenuItem("退出", lambda: on_quit()))
-        return items
-
-    def quick_launch(state, config_idx):
-        """快速启动指定配置"""
-        import subprocess
-        import sys
-        import os
-
-        if config_idx >= len(state.configs):
-            return
-
-        cfg = state.configs[config_idx]
-        cli_type = cfg.get('cli_type', 'claude')
-
-        # CLI 工具信息
-        CLI_TOOLS = {
-            'claude': {'command': 'claude', 'default_key_name': 'ANTHROPIC_API_KEY', 'base_url_env': 'ANTHROPIC_BASE_URL'},
-            'codex': {'command': 'codex', 'default_key_name': 'OPENAI_API_KEY', 'base_url_env': 'OPENAI_BASE_URL'},
-            'gemini': {'command': 'gemini', 'default_key_name': 'GEMINI_API_KEY', 'base_url_env': 'GEMINI_API_BASE'},
-            'aider': {'command': 'aider', 'default_key_name': 'ANTHROPIC_API_KEY', 'base_url_env': 'ANTHROPIC_BASE_URL'},
-        }
-
-        cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
-        api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
-        key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
-        endpoint = cfg.get('provider', {}).get('endpoint', '')
-        base_url_env = cfg.get('provider', {}).get('base_url_env', cli_info['base_url_env'])
-        selected_model = cfg.get('provider', {}).get('selected_model', '')
-
-        cli_cmd = cli_info.get('command', 'claude')
-        if selected_model:
-            cli_cmd = f"{cli_cmd} --model {selected_model}"
-
-        # Windows 启动
-        if sys.platform == 'win32':
-            set_cmds = [f'set {key_name}={api_key}']
-            if endpoint:
-                set_cmds.append(f'set {base_url_env}={endpoint}')
-            full_cmd = ' && '.join(set_cmds + [cli_cmd])
-            subprocess.Popen(['cmd', '/k', full_cmd], creationflags=subprocess.CREATE_NEW_CONSOLE)
-        else:
-            env = os.environ.copy()
-            env[key_name] = api_key
-            if endpoint:
-                env[base_url_env] = endpoint
-            subprocess.Popen(['bash', '-c', cli_cmd], env=env)
+        return [
+            pystray.MenuItem("显示窗口", lambda: on_show_window()),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("退出", lambda: on_quit()),
+        ]
 
     icon = pystray.Icon(
         "AI CLI Manager",

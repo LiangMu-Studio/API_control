@@ -29,6 +29,7 @@ if sys.platform == 'win32':
         sys.exit(0)
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs
+from ui.clipboard_paste import setup_clipboard_paste
 from ui.theme_manager import ThemeManager
 
 # 获取图标路径（兼容打包后）
@@ -216,16 +217,22 @@ def main(page: ft.Page):
     # 注册截图快捷键 Ctrl+Alt+A
     setup_screenshot_hotkey()
 
+    # 注册 Win+V 剪贴板粘贴支持
+    setup_clipboard_paste(page)
+
     # 启动系统托盘图标
     global _tray_icon
     try:
         from ui.tray import create_tray_icon, run_tray_in_background, stop_tray
 
         def show_window():
-            page.window.skip_task_bar = False  # 恢复任务栏显示
-            page.window.minimized = False
-            page.window.focused = True
-            page.update()
+            def do_show():
+                page.window.skip_task_bar = False
+                page.window.minimized = False
+                page.window.visible = True
+                page.window.focused = True
+                page.update()
+            page.run_thread(do_show)
 
         def quit_app():
             page.window.prevent_close = False  # 允许关闭

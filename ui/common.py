@@ -26,6 +26,7 @@ def show_snackbar(page, text, duration=1000):
     page.open(ft.SnackBar(ft.Text(text), duration=duration))
     page.update()
 
+
 # ========== 主题配置 ==========
 THEMES = {
     "light": {

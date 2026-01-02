@@ -198,6 +198,8 @@ LANG = {
         'history_cleared': '历史已清空',
         'tags': '标签',
         'minimize_to_tray': '最小化到托盘',
+        'quota_url': '流量查询地址',
+        'check_quota': '查询',
     },
     'en': {
         'title': 'AI CLI Manager v{}',
@@ -397,5 +399,7 @@ LANG = {
         'history_cleared': 'History cleared',
         'tags': 'Tags',
         'minimize_to_tray': 'Minimize to tray',
+        'quota_url': 'Quota Check URL',
+        'check_quota': 'Check',
     }
 }

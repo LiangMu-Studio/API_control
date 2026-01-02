@@ -46,6 +46,12 @@ A comprehensive management tool for AI CLI tools. Supports multi-provider API ke
 - **Batch Operations**: Select and delete multiple sessions
 - **Date Filtering**: Filter by today, week, month, or custom range
 
+#### Screenshot Tool
+- **WeChat-Style Screenshot**: Region selection with annotation tools
+- **Annotation Tools**: Rectangle, Ellipse, Arrow, Line, Text, Pen
+- **Global Hotkey**: Customizable shortcut (default: Alt+S)
+- **Auto Cleanup**: Screenshots auto-delete after 7 days
+
 #### Integrated Terminal
 - **Multi-Terminal Support**: PowerShell 7, PowerShell 5, CMD, Git Bash
 - **Environment Injection**: Auto-set API keys and endpoints
@@ -64,6 +70,7 @@ A comprehensive management tool for AI CLI tools. Supports multi-provider API ke
 
 | Shortcut | Function |
 |----------|----------|
+| `Alt+S` | Screenshot (customizable) |
 | `Ctrl+T` | Open Terminal |
 | `Ctrl+C` | Copy Key |
 | `Delete` | Delete Configuration |
@@ -113,6 +120,12 @@ A comprehensive management tool for AI CLI tools. Supports multi-provider API ke
 - **批量操作**：选择并删除多个会话
 - **日期过滤**：按今天、本周、本月或自定义范围过滤
 
+#### 截图工具
+- **微信风格截图**：区域选择和标注工具
+- **标注工具**：矩形、椭圆、箭头、直线、文字、画笔
+- **全局快捷键**：可自定义快捷键（默认：Alt+S）
+- **自动清理**：截图 7 天后自动删除
+
 #### 集成终端
 - **多终端支持**：PowerShell 7、PowerShell 5、CMD、Git Bash
 - **环境注入**：自动设置 API 密钥和端点
@@ -131,6 +144,7 @@ A comprehensive management tool for AI CLI tools. Supports multi-provider API ke
 
 | 快捷键 | 功能 |
 |--------|------|
+| `Alt+S` | 截图（可自定义）|
 | `Ctrl+T` | 打开终端 |
 | `Ctrl+C` | 复制密钥 |
 | `Delete` | 删除配置 |
@@ -151,11 +165,15 @@ AI_CLI_Manager/
 │   ├── state.py             # 应用状态管理 / App state
 │   ├── lang.py              # 多语言支持 / i18n
 │   ├── database.py          # 数据库操作 / Database ops
-│   └── pages/               # 页面模块 / Page modules
-│       ├── api_keys.py      # API 密钥页面 / API keys page
-│       ├── mcp.py           # MCP 服务器页面 / MCP page
-│       ├── prompts.py       # 提示词页面 / Prompts page
-│       └── history.py       # 历史记录页面 / History page
+│   ├── hotkey.py            # 全局快捷键 / Global hotkeys
+│   ├── theme_manager.py     # 主题管理器 / Theme manager
+│   ├── pages/               # 页面模块 / Page modules
+│   │   ├── api_keys.py      # API 密钥页面 / API keys page
+│   │   ├── mcp.py           # MCP 服务器页面 / MCP page
+│   │   ├── prompts.py       # 提示词页面 / Prompts page
+│   │   └── history.py       # 历史记录页面 / History page
+│   └── tools/               # 工具模块 / Tool modules
+│       └── screenshot_tool.py # 截图工具 / Screenshot tool
 │
 ├── core/                    # 核心逻辑 / Core logic
 │   ├── key_manager.py       # 密钥管理 / Key management
@@ -183,6 +201,12 @@ AI_CLI_Manager/
 ---
 
 ## Version History / 版本历史
+
+### v1.1 (2026-01-02)
+- Screenshot tool with WeChat-style annotation / 微信风格截图标注工具
+- Global hotkey support (Alt+S) / 全局快捷键支持
+- Auto cleanup screenshots after 7 days / 截图 7 天自动清理
+- Theme manager optimization / 主题管理器优化
 
 ### v1.0 (2026-01-01)
 - Initial release with full feature set / 首个完整功能版本

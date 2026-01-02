@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from datetime import datetime
+import time
 
 from ..common import (
     THEMES, CLI_TOOLS, save_configs, save_settings,
@@ -86,6 +87,7 @@ def create_api_page(state):
 
     # 缓存控件引用
     _tree_refs = {"cli": {}, "endpoint": {}, "config": {}}
+    _last_click = {"config": None, "time": 0}  # 双击检测
 
     # 终端和环境下拉
     terminal_dropdown = ft.Dropdown(
@@ -145,6 +147,14 @@ def create_api_page(state):
         page.update()
 
     def _on_config_click(idx):
+        now = time.time()
+        # 双击检测：同一项 400ms 内再次点击
+        if _last_click["config"] == idx and (now - _last_click["time"]) < 0.4:
+            show_config_dialog(idx)
+            _last_click["config"] = None
+            return
+        _last_click["config"] = idx
+        _last_click["time"] = now
         state.select_config(idx)
         _update_selection()
         page.update()

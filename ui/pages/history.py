@@ -201,6 +201,45 @@ def create_history_page(state):
         dlg.open = True
         state.page.update()
 
+    def export_session(fmt='html'):
+        """导出选中会话"""
+        if not selected_sessions:
+            show_snackbar(state.page, L['no_selection'])
+            return
+        from core.session_export import export_session_html, export_session_md
+        data = list(selected_sessions.values())[0]
+        sid = data['session_id'][:12]
+        def on_result(result):
+            if result.path:
+                try:
+                    if fmt == 'html':
+                        export_session_html(data, result.path)
+                    else:
+                        export_session_md(data, result.path)
+                    show_snackbar(state.page, L.get('export_success', '导出成功: {}').format(result.path))
+                except Exception as ex:
+                    show_snackbar(state.page, str(ex))
+        picker = ft.FilePicker(on_result=on_result)
+        state.page.overlay.append(picker)
+        state.page.update()
+        picker.save_file(file_name=f'session_{sid}.{fmt}', allowed_extensions=[fmt])
+
+    def export_batch(e):
+        """批量导出所有会话"""
+        from core.session_export import export_sessions_batch
+        all_data = [d for _, d in all_session_items]
+        if not all_data:
+            show_snackbar(state.page, L['history_no_records'])
+            return
+        def on_result(result):
+            if result.path:
+                cnt = export_sessions_batch(all_data, result.path, 'html')
+                show_snackbar(state.page, L.get('export_batch_success', '批量导出 {} 个会话到 {}').format(cnt, result.path))
+        picker = ft.FilePicker(on_result=on_result)
+        state.page.overlay.append(picker)
+        state.page.update()
+        picker.get_directory_path()
+
     batch_delete_btn = ft.TextButton(L['history_delete_selected'], visible=False, on_click=lambda _: del_sessions(list(selected_sessions.values())))
     batch_count_text = ft.Text('', size=12)
 
@@ -220,7 +259,11 @@ def create_history_page(state):
     history_search.on_submit = lambda e: refresh_history_tree(e.control.value or '')
 
     history_page = ft.Column([
-        ft.Row([ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD), cli_dropdown, history_search, ft.TextButton('刷新', on_click=on_cli_change), batch_count_text, batch_delete_btn, history_progress], wrap=True),
+        ft.Row([ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD), cli_dropdown, history_search, ft.TextButton('刷新', on_click=on_cli_change), batch_count_text, batch_delete_btn,
+                ft.TextButton(L.get('export_html', '导出HTML'), on_click=lambda _: export_session('html')),
+                ft.TextButton(L.get('export_md', '导出MD'), on_click=lambda _: export_session('md')),
+                ft.TextButton(L.get('export_batch', '批量导出'), on_click=export_batch),
+                history_progress], wrap=True),
         history_stats,
         ft.Row([ft.Container(history_tree, expand=2, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10), ft.Container(history_detail, expand=3, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10)], expand=True),
     ], expand=True, spacing=10)

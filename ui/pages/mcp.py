@@ -489,6 +489,21 @@ def create_mcp_page(state):
             threading.Thread(target=lambda: mcp_registry.fetch_all(), daemon=True).start()
     check_auto_update()
 
+    def check_mcp_status(e):
+        """检测 MCP 服务器状态"""
+        from core.mcp_checker import check_npm_version, get_all_mcp_status
+        show_snackbar(state.page, L.get('mcp_checking', '正在检测...'))
+        def run():
+            npm_ok, npm_ver = check_npm_version()
+            statuses = get_all_mcp_status(state.mcp_list)
+            results = [f"npm: {'v' + npm_ver if npm_ok else 'not found'}"]
+            for s in statuses:
+                icon = '✓' if s['installed'] else '✗'
+                ver = f" v{s['version']}" if s['version'] else ''
+                results.append(f"{icon} {s['name']}{ver}")
+            show_snackbar(state.page, ' | '.join(results[:5]))
+        threading.Thread(target=run, daemon=True).start()
+
     mcp_page = ft.Column([
         ft.Row([
             ft.Text(L['mcp'], size=20, weight=ft.FontWeight.BOLD),
@@ -497,6 +512,7 @@ def create_mcp_page(state):
             ft.IconButton(ft.Icons.INVENTORY_2, on_click=show_mcp_repository, tooltip=L['mcp_browse']),
             ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=add_from_official, tooltip=L['mcp_official']),
             ft.IconButton(ft.Icons.STORE, on_click=browse_mcp_market, tooltip=L['mcp_market']),
+            ft.IconButton(ft.Icons.HEALTH_AND_SAFETY, on_click=check_mcp_status, tooltip=L.get('mcp_check_status', '检测状态')),
             ft.IconButton(ft.Icons.EDIT, on_click=edit_mcp, tooltip=L['edit']),
             ft.IconButton(ft.Icons.DELETE, on_click=delete_mcp, tooltip=L['delete']),
         ]),

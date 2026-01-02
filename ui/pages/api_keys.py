@@ -103,7 +103,42 @@ def create_api_page(state):
         options=[ft.dropdown.Option(k) for k in state.python_envs.keys()],
         width=220,
     )
-    work_dir_field = ft.TextField(label=L['work_dir'], value=state.settings.get('work_dir', ''), expand=True)
+
+    # 工作目录历史记录
+    work_dir_history = state.settings.get('work_dir_history', [])
+    current_work_dir = state.settings.get('work_dir', '')
+    if current_work_dir and current_work_dir not in work_dir_history:
+        work_dir_history.insert(0, current_work_dir)
+
+    def build_workdir_options():
+        opts = [ft.dropdown.Option(d, d[-50:] if len(d) > 50 else d) for d in work_dir_history[:10]]
+        return opts
+
+    work_dir_dropdown = ft.Dropdown(
+        label=L['work_dir'],
+        value=current_work_dir,
+        options=build_workdir_options(),
+        expand=True,
+        on_change=lambda e: save_work_dir(e.control.value),
+    )
+
+    def save_work_dir(path):
+        if not path:
+            return
+        state.settings['work_dir'] = path
+        if path not in work_dir_history:
+            work_dir_history.insert(0, path)
+        state.settings['work_dir_history'] = work_dir_history[:10]
+        save_settings(state.settings)
+
+    def clear_workdir_history(e):
+        work_dir_history.clear()
+        state.settings['work_dir_history'] = []
+        save_settings(state.settings)
+        work_dir_dropdown.options = []
+        work_dir_dropdown.value = None
+        show_snackbar(page, L.get('history_cleared', '历史已清空'))
+        page.update()
 
     # 提示词下拉
     def build_prompt_options():
@@ -233,11 +268,16 @@ def create_api_page(state):
                         for idx, cfg in tree[cli_type][endpoint]:
                             is_selected = state.selected_config == idx
                             cfg_icon = ft.Icon(ft.Icons.KEY, size=16, color=theme['icon_key_selected'] if is_selected else ft.Colors.GREY_600)
-                            cfg_text = ft.Text(cfg.get('label', 'Unnamed'),
+                            cfg_label = cfg.get('label', 'Unnamed')
+                            cfg_tags = cfg.get('tags', '')
+                            cfg_text = ft.Text(cfg_label,
                                                weight=ft.FontWeight.BOLD if is_selected else None,
                                                color=theme['text_selected'] if is_selected else theme['text'])
+                            row_items = [cfg_icon, cfg_text]
+                            if cfg_tags:
+                                row_items.append(ft.Text(f"[{cfg_tags}]", size=10, color=ft.Colors.PURPLE_300))
                             cfg_container = ft.Container(
-                                content=ft.Row([cfg_icon, cfg_text], spacing=5),
+                                content=ft.Row(row_items, spacing=5),
                                 padding=ft.padding.only(left=60, top=5, bottom=5),
                                 bgcolor=theme['selection_bg'] if is_selected else None,
                                 border_radius=4, ink=True,
@@ -253,6 +293,7 @@ def create_api_page(state):
         provider_data = cfg.get('provider', {})
 
         name_field = ft.TextField(label=L['name'], value=cfg.get('label', ''), expand=True)
+        tags_field = ft.TextField(label=L.get('tags', '标签'), value=cfg.get('tags', ''), expand=True, hint_text='用逗号分隔')
 
         # CLI 下拉
         cli_dropdown = ft.Dropdown(
@@ -390,6 +431,7 @@ def create_api_page(state):
                 'id': cfg.get('id', f"{name_field.value}-{int(datetime.now().timestamp())}"),
                 'label': name_field.value,
                 'cli_type': cli_dropdown.value,
+                'tags': tags_field.value,
                 'provider': {
                     'type': provider_type,
                     'endpoint': endpoint_field.value,
@@ -420,7 +462,7 @@ def create_api_page(state):
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
             content=ft.Column([
-                name_field,
+                ft.Row([name_field, tags_field]),
                 ft.Row([cli_dropdown, provider_dropdown]),
                 model_env_field,
                 model_dropdown,
@@ -470,6 +512,26 @@ def create_api_page(state):
             key = state.configs[state.selected_config].get('provider', {}).get('credentials', {}).get('api_key', '')
             page.set_clipboard(key)
             show_snackbar(page, L['copied'])
+
+    def validate_config_key(e):
+        """验证选中配置的 API Key"""
+        if state.selected_config is None:
+            show_snackbar(page, L['no_selection'])
+            return
+        cfg = state.configs[state.selected_config]
+        provider = cfg.get('provider', {})
+        provider_type = provider.get('type', 'anthropic')
+        api_key = provider.get('credentials', {}).get('api_key', '')
+        endpoint = provider.get('endpoint', '')
+
+        show_snackbar(page, L.get('validating', '验证中...'))
+
+        import threading
+        def run_validate():
+            from core.api_validator import validate_api_key
+            valid, msg = validate_api_key(provider_type, api_key, endpoint)
+            show_snackbar(page, L.get('validate_result', '验证结果: {}').format(msg))
+        threading.Thread(target=run_validate, daemon=True).start()
 
     def move_up(e):
         if state.selected_config is not None:
@@ -574,17 +636,75 @@ def create_api_page(state):
         page.update()
         picker.pick_files(allowed_extensions=['json'])
 
+    def show_sync_dialog(e):
+        """显示云同步对话框"""
+        from core.gist_sync import GistSync, load_sync_settings, save_sync_settings
+        settings = load_sync_settings()
+        token_field = ft.TextField(label=L.get('sync_token', 'GitHub Token'), value=settings.get('token', ''), password=True, can_reveal_password=True, expand=True)
+        gist_id_field = ft.TextField(label=L.get('sync_gist_id', 'Gist ID'), value=settings.get('gist_id', ''), expand=True)
+
+        def do_upload(e):
+            if not token_field.value:
+                show_snackbar(page, L.get('sync_no_token', '请先设置 GitHub Token'))
+                return
+            save_sync_settings({'token': token_field.value, 'gist_id': gist_id_field.value})
+            show_snackbar(page, L.get('sync_uploading', '正在上传...'))
+            import threading
+            def run():
+                sync = GistSync(token_field.value, gist_id_field.value or None)
+                ok, result = sync.upload(state.configs, state.prompts, state.mcp_list)
+                if ok:
+                    gist_id_field.value = result
+                    save_sync_settings({'token': token_field.value, 'gist_id': result})
+                    show_snackbar(page, L.get('sync_upload_ok', '上传成功，Gist ID: {}').format(result))
+                else:
+                    show_snackbar(page, L.get('sync_fail', '同步失败: {}').format(result))
+                page.update()
+            threading.Thread(target=run, daemon=True).start()
+
+        def do_download(e):
+            if not token_field.value or not gist_id_field.value:
+                show_snackbar(page, L.get('sync_no_token', '请先设置 GitHub Token'))
+                return
+            save_sync_settings({'token': token_field.value, 'gist_id': gist_id_field.value})
+            show_snackbar(page, L.get('sync_downloading', '正在下载...'))
+            import threading
+            def run():
+                sync = GistSync(token_field.value, gist_id_field.value)
+                ok, data = sync.download()
+                if ok:
+                    configs = data.get('configs', [])
+                    state.configs.extend(configs)
+                    state.save_configs()
+                    refresh_config_list()
+                    show_snackbar(page, L.get('sync_download_ok', '下载成功，已导入 {} 个配置').format(len(configs)))
+                else:
+                    show_snackbar(page, L.get('sync_fail', '同步失败: {}').format(data.get('error', '')))
+                page.update()
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('sync_settings', '云同步设置')),
+            content=ft.Column([token_field, gist_id_field], tight=True, spacing=10, width=400),
+            actions=[
+                ft.TextButton(L['cancel'], on_click=lambda e: page.close(dlg)),
+                ft.OutlinedButton(L.get('sync_download', '下载'), icon=ft.Icons.CLOUD_DOWNLOAD, on_click=do_download),
+                ft.ElevatedButton(L.get('sync_upload', '上传'), icon=ft.Icons.CLOUD_UPLOAD, on_click=do_upload),
+            ],
+        )
+        page.open(dlg)
+
     def browse_folder(e):
         def on_result(result):
             if result.path:
-                work_dir_field.value = result.path
-                state.settings['work_dir'] = result.path
-                save_settings(state.settings)
+                work_dir_dropdown.value = result.path
+                save_work_dir(result.path)
+                work_dir_dropdown.options = build_workdir_options()
                 page.update()
         picker = ft.FilePicker(on_result=on_result)
         page.overlay.append(picker)
         page.update()
-        picker.get_directory_path(initial_directory=work_dir_field.value or None)
+        picker.get_directory_path(initial_directory=work_dir_dropdown.value or None)
 
     def refresh_terminals_click(e):
         state.terminals = detect_terminals()
@@ -628,7 +748,7 @@ def create_api_page(state):
         print(f"[DEBUG] {base_url_env}={endpoint}")
         print(f"[DEBUG] model={selected_model}")
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
-        cwd = work_dir_field.value or None
+        cwd = work_dir_dropdown.value or None
         cli_cmd = cli_info.get('command', 'claude')
         # 如果配置了模型，添加 --model 参数
         if selected_model:
@@ -663,12 +783,15 @@ def create_api_page(state):
             subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
             subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)
+        # 记录启动日志
+        from core.cli_logger import log_cli_launch
+        log_cli_launch(cfg.get('label', ''), cli_type, cli_cmd, cwd)
 
     def apply_selected_prompt(e=None):
         """应用选中的提示词"""
         if not prompt_dropdown.value:
             return
-        if not work_dir_field.value:
+        if not work_dir_dropdown.value:
             show_snackbar(page, L['prompt_select_workdir'])
             return
         cli_type = 'claude'
@@ -680,7 +803,7 @@ def create_api_page(state):
         user_content = user_prompt.get('content', '')
         user_id = prompt_dropdown.value
         try:
-            file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_field.value)
+            file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_dropdown.value)
             show_snackbar(page, L['prompt_written'].format(file_path))
         except Exception as ex:
             show_snackbar(page, L['prompt_write_fail'].format(ex))
@@ -778,7 +901,7 @@ def create_api_page(state):
         import threading
         import time as _time
 
-        save_dir = work_dir_field.value or str(Path.cwd() / "screenshots")
+        save_dir = work_dir_dropdown.value or str(Path.cwd() / "screenshots")
         script = str(Path(__file__).parent.parent / "tools" / "screenshot_tool.py")
 
         # 清理一周前的截图
@@ -877,7 +1000,7 @@ def create_api_page(state):
                 kb.unhook(hook_id[0])
             if captured_keys:
                 new_key = "+".join(p.lower() for p in captured_keys)
-                update_hotkey(new_key, work_dir_field.value)
+                update_hotkey(new_key, work_dir_dropdown.value)
                 hotkey_btn.text = f"快捷键 {'+'.join(captured_keys)}"
                 show_snackbar(page, f'快捷键已设置: {"+".join(captured_keys)}')
             page.close(dlg)
@@ -915,10 +1038,12 @@ def create_api_page(state):
                 ft.OutlinedButton(L['edit'], icon=ft.Icons.EDIT, on_click=edit_config, width=120),
                 ft.OutlinedButton(L['delete'], icon=ft.Icons.DELETE, on_click=delete_config, width=120),
                 ft.OutlinedButton(L['copy_key'], icon=ft.Icons.COPY, on_click=copy_config_key, width=120),
+                ft.OutlinedButton(L.get('validate_key', '验证'), icon=ft.Icons.VERIFIED, on_click=validate_config_key, width=120),
                 ft.OutlinedButton(L['move_up'], icon=ft.Icons.ARROW_UPWARD, on_click=move_up, width=120),
                 ft.OutlinedButton(L['move_down'], icon=ft.Icons.ARROW_DOWNWARD, on_click=move_down, width=120),
                 ft.OutlinedButton(L['export'], icon=ft.Icons.UPLOAD, on_click=export_configs, width=120),
                 ft.OutlinedButton(L['import'], icon=ft.Icons.DOWNLOAD, on_click=import_configs, width=120),
+                ft.OutlinedButton(L.get('sync', '同步'), icon=ft.Icons.CLOUD_SYNC, on_click=show_sync_dialog, width=120),
             ], spacing=5, alignment=ft.MainAxisAlignment.START),
         ], expand=1, vertical_alignment=ft.CrossAxisAlignment.STRETCH),
         ft.Divider(),
@@ -930,7 +1055,8 @@ def create_api_page(state):
             ft.TextButton(L['refresh_envs'], icon=ft.Icons.REFRESH, on_click=refresh_envs_click),
             ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),
-        ft.Row([work_dir_field, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
+        ft.Row([work_dir_dropdown, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
+                ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_history', '清空历史'), on_click=clear_workdir_history),
                 ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
         ft.Row([
             prompt_dropdown,

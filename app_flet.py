@@ -44,6 +44,9 @@ from ui.pages.prompts import create_prompts_page
 from ui.pages.mcp import create_mcp_page
 from ui.pages.history import create_history_page
 
+# 全局托盘图标引用
+_tray_icon = None
+
 
 def main(page: ft.Page):
     page.title = f"AI CLI Manager v{VERSION}"
@@ -60,11 +63,27 @@ def main(page: ft.Page):
     L = state.L
     theme = state.get_theme()
 
+    # 点击 X 时最小化到托盘而不是退出
+    def on_window_event(e):
+        if e.data == "close":
+            page.window.prevent_close = True
+            page.window.minimized = True
+            page.window.skip_task_bar = True  # 从任务栏隐藏
+            page.update()
+
+    page.window.on_event = on_window_event
+
     # 初始化主题管理器
     theme_mgr = ThemeManager(state, page)
 
     page.bgcolor = theme['bg']
     page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
+
+    # 最小化到托盘
+    def minimize_to_tray(_):
+        page.window.minimized = True
+        page.window.skip_task_bar = True
+        page.update()
 
     # 自定义标题栏
     title_bar = ft.WindowDragArea(
@@ -78,7 +97,7 @@ def main(page: ft.Page):
                 ft.IconButton(ft.Icons.CROP_SQUARE, icon_size=16, icon_color=theme["text_sec"],
                              on_click=lambda _: setattr(page.window, 'maximized', not page.window.maximized) or page.update()),
                 ft.IconButton(ft.Icons.CLOSE, icon_size=16, icon_color=theme["text_sec"],
-                             on_click=lambda _: page.window.close()),
+                             on_click=minimize_to_tray, tooltip=L.get('minimize_to_tray', '最小化到托盘')),
             ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             bgcolor=theme["surface"],
             padding=ft.padding.only(left=10, right=5, top=5, bottom=5),
@@ -175,8 +194,48 @@ def main(page: ft.Page):
             history_cache["codex"] = await loop.run_in_executor(None, codex_history_manager.load_sessions)
     page.run_task(preload_history)
 
+    # 启动时检查更新
+    def check_for_updates():
+        import threading
+        def run():
+            from core.update_checker import check_update
+            has_update, new_ver, url = check_update(VERSION)
+            if has_update and url:
+                async def show_update():
+                    page.open(ft.SnackBar(
+                        content=ft.Row([
+                            ft.Text(L.get('update_available', f'发现新版本 v{new_ver}')),
+                            ft.TextButton(L.get('view_update', '查看'), on_click=lambda _: page.launch_url(url)),
+                        ]),
+                        duration=10000,
+                    ))
+                page.run_task(show_update)
+        threading.Thread(target=run, daemon=True).start()
+    check_for_updates()
+
     # 注册截图快捷键 Ctrl+Alt+A
     setup_screenshot_hotkey()
+
+    # 启动系统托盘图标
+    global _tray_icon
+    try:
+        from ui.tray import create_tray_icon, run_tray_in_background, stop_tray
+
+        def show_window():
+            page.window.skip_task_bar = False  # 恢复任务栏显示
+            page.window.minimized = False
+            page.window.focused = True
+            page.update()
+
+        def quit_app():
+            page.window.prevent_close = False  # 允许关闭
+            stop_tray(_tray_icon)
+            page.window.close()
+
+        _tray_icon = create_tray_icon(state, show_window, quit_app)
+        run_tray_in_background(_tray_icon)
+    except Exception as e:
+        print(f"[Tray] 托盘图标启动失败: {e}")
 
 
 if __name__ == "__main__":

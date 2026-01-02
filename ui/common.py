@@ -341,12 +341,17 @@ def get_prompt_file_path(cli_type: str) -> Path:
     return home / cli['prompt_file']
 
 def write_prompt_to_cli(cli_type: str, system_content: str, user_content: str, user_id: str, workdir: str | None = None) -> Path:
+    from core.template_vars import expand_template_vars
     cli = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
     if workdir:
         file_path = Path(workdir) / cli['prompt_file']
     else:
         file_path = get_prompt_file_path(cli_type)
     file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 展开模板变量
+    system_content = expand_template_vars(system_content, workdir)
+    user_content = expand_template_vars(user_content, workdir)
 
     parts = []
     if system_content.strip():

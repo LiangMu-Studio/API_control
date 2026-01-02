@@ -14,6 +14,29 @@ from typing import List, Optional
 import time
 import math
 import traceback
+import json
+
+# 配置文件路径
+CONFIG_PATH = Path(__file__).parent.parent.parent / "data" / "screenshot.json"
+
+def load_settings() -> dict:
+    """加载截图设置"""
+    try:
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"color": "#ff0000", "width": 3}
+
+def save_settings(color: str, width: int):
+    """保存截图设置"""
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"color": color, "width": width}, f)
+    except Exception:
+        pass
 
 def debug(msg):
     import sys
@@ -60,12 +83,13 @@ class ScreenshotSelector(QWidget):
         self.selecting = True  # 是否在框选阶段
         self.selection_rect = None
 
-        # 标注相关
+        # 标注相关 - 加载保存的设置
         self.annotations: List[Annotation] = []
         self.undo_stack: List[Annotation] = []
         self.current_tool = ToolType.NONE
-        self.current_color = QColor(255, 0, 0)
-        self.current_width = 3
+        settings = load_settings()
+        self.current_color = QColor(settings.get("color", "#ff0000"))
+        self.current_width = settings.get("width", 3)
         self.drawing = False
         self.draw_start = None
         self.current_points = []
@@ -317,11 +341,11 @@ class ScreenshotSelector(QWidget):
             # 线宽
             self.width_spin = QSpinBox(self)
             self.width_spin.setRange(1, 10)
-            self.width_spin.setValue(3)
+            self.width_spin.setValue(self.current_width)
             self.width_spin.setGeometry(x, toolbar_y, 50, btn_size)
             self.width_spin.setStyleSheet("color: white; background: rgba(50,50,50,0.9); border-radius: 6px; font-size: 14px;")
             self.width_spin.setToolTip("线条粗细")
-            self.width_spin.valueChanged.connect(lambda v: setattr(self, 'current_width', v))
+            self.width_spin.valueChanged.connect(self._on_width_change)
             self.width_spin.show()
             x += 58
 
@@ -403,6 +427,11 @@ class ScreenshotSelector(QWidget):
         if color.isValid():
             self.current_color = color
             self.color_btn.setStyleSheet(f"background-color: {color.name()}; border-radius: 4px;")
+            save_settings(color.name(), self.current_width)
+
+    def _on_width_change(self, v):
+        self.current_width = v
+        save_settings(self.current_color.name(), v)
 
     def _undo(self):
         if self.annotations:

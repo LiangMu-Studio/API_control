@@ -950,6 +950,9 @@ def create_api_page(state):
         import subprocess
         import threading
 
+        page.window.minimized = True
+        page.update()
+
         script = str(Path(__file__).parent.parent / "tools" / "path_picker.py")
 
         def run():
@@ -966,16 +969,19 @@ def create_api_page(state):
         threading.Thread(target=run, daemon=True).start()
 
     # 快捷键设置
-    from ..hotkey import load_hotkey, update_hotkey
+    from ..hotkey import load_hotkey, update_hotkey, update_copypath_hotkey
 
     def format_hotkey(hk: str) -> str:
         """格式化快捷键显示：alt+s -> Alt+S"""
         return '+'.join(p.capitalize() for p in hk.split('+'))
 
-    current_hotkey_display = format_hotkey(load_hotkey())
-    hotkey_btn = ft.OutlinedButton(f"快捷键 {current_hotkey_display}", on_click=lambda e: show_hotkey_dialog(e), width=140)
+    current_hotkey_display = format_hotkey(load_hotkey("screenshot"))
+    hotkey_btn = ft.OutlinedButton(f"截图 {current_hotkey_display}", on_click=lambda e: show_hotkey_dialog(e, "screenshot"), width=120)
 
-    def show_hotkey_dialog(e):
+    current_copypath_display = format_hotkey(load_hotkey("copy_path"))
+    copypath_btn = ft.OutlinedButton(f"路径 {current_copypath_display}", on_click=lambda e: show_hotkey_dialog(e, "copy_path"), width=120)
+
+    def show_hotkey_dialog(e, key_type="screenshot"):
         """显示快捷键设置对话框"""
         try:
             import keyboard as kb
@@ -984,7 +990,8 @@ def create_api_page(state):
             return
 
         captured_keys = []
-        current_hk = format_hotkey(load_hotkey())
+        current_hk = format_hotkey(load_hotkey(key_type))
+        title = "设置截图快捷键" if key_type == "screenshot" else "设置复制路径快捷键"
         key_display = ft.Text("请按下快捷键...", size=16, weight=ft.FontWeight.BOLD)
         hook_id = [None]
 
@@ -1014,8 +1021,12 @@ def create_api_page(state):
                 kb.unhook(hook_id[0])
             if captured_keys:
                 new_key = "+".join(p.lower() for p in captured_keys)
-                update_hotkey(new_key, work_dir_dropdown.value)
-                hotkey_btn.text = f"快捷键 {'+'.join(captured_keys)}"
+                if key_type == "screenshot":
+                    update_hotkey(new_key, work_dir_dropdown.value)
+                    hotkey_btn.text = f"截图 {'+'.join(captured_keys)}"
+                else:
+                    update_copypath_hotkey(new_key)
+                    copypath_btn.text = f"路径 {'+'.join(captured_keys)}"
                 show_snackbar(page, f'快捷键已设置: {"+".join(captured_keys)}')
             page.close(dlg)
 
@@ -1025,7 +1036,7 @@ def create_api_page(state):
             page.close(dlg)
 
         dlg = ft.AlertDialog(
-            title=ft.Text("设置截图快捷键"),
+            title=ft.Text(title),
             content=ft.Container(
                 ft.Column([
                     ft.Text(f"当前快捷键为：{current_hk}", size=14),
@@ -1076,8 +1087,9 @@ def create_api_page(state):
             prompt_dropdown,
             ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),
             ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, on_click=take_screenshot, width=100, tooltip="截图保留一周"),
-            ft.ElevatedButton(L.get('pick_path', '抓取路径'), icon=ft.Icons.LINK, on_click=pick_path, width=110, tooltip="选择文件复制绝对路径"),
             hotkey_btn,
+            ft.ElevatedButton(L.get('pick_path', '复制路径'), icon=ft.Icons.LINK, on_click=pick_path, width=110, tooltip="选择文件复制绝对路径"),
+            copypath_btn,
         ], spacing=10),
     ], expand=True, spacing=10)
 

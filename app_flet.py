@@ -39,7 +39,7 @@ else:
     BASE_DIR = Path(__file__).parent
 ICON_PATH = str(BASE_DIR / "icon.ico")
 from ui.database import history_manager, codex_history_manager, history_cache
-from ui.hotkey import setup_screenshot_hotkey
+from ui.hotkey import setup_screenshot_hotkey, setup_copypath_hotkey
 from ui.pages.api_keys import create_api_page
 from ui.pages.prompts import create_prompts_page
 from ui.pages.mcp import create_mcp_page
@@ -64,12 +64,14 @@ def main(page: ft.Page):
     L = state.L
     theme = state.get_theme()
 
-    # 点击 X 时最小化到托盘而不是退出
+    # 始终阻止关闭，只能通过托盘退出
+    page.window.prevent_close = True
+
+    # 点击 X 时最小化到托盘
     def on_window_event(e):
         if e.data == "close":
-            page.window.prevent_close = True
             page.window.minimized = True
-            page.window.skip_task_bar = True  # 从任务栏隐藏
+            page.window.skip_task_bar = True
             page.update()
 
     page.window.on_event = on_window_event
@@ -216,6 +218,7 @@ def main(page: ft.Page):
 
     # 注册截图快捷键 Ctrl+Alt+A
     setup_screenshot_hotkey()
+    setup_copypath_hotkey(page=page)
 
     # 注册 Win+V 剪贴板粘贴支持
     setup_clipboard_paste(page)
@@ -239,7 +242,17 @@ def main(page: ft.Page):
             stop_tray(_tray_icon)
             page.window.close()
 
-        _tray_icon = create_tray_icon(state, show_window, quit_app)
+        def tray_screenshot():
+            import subprocess
+            script = str(Path(__file__).parent / "ui" / "tools" / "screenshot_tool.py")
+            subprocess.Popen([sys.executable, script, ""], creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+
+        def tray_copy_path():
+            import subprocess
+            script = str(Path(__file__).parent / "ui" / "tools" / "path_picker.py")
+            subprocess.Popen([sys.executable, script], creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+
+        _tray_icon = create_tray_icon(state, show_window, quit_app, tray_screenshot, tray_copy_path)
         run_tray_in_background(_tray_icon)
     except Exception as e:
         print(f"[Tray] 托盘图标启动失败: {e}")

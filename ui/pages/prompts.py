@@ -2,6 +2,7 @@
 import flet as ft
 from datetime import datetime
 from ..common import THEMES, show_snackbar
+from ..clipboard_paste import enable_clipboard_paste
 
 
 def create_prompts_page(state):
@@ -28,6 +29,8 @@ def create_prompts_page(state):
     prompt_content = ft.TextField(
         label=L['prompt_content'], multiline=True, min_lines=12, expand=True, border_radius=8,
     )
+    enable_clipboard_paste(global_prompt_content)
+    enable_clipboard_paste(prompt_content)
     expanded_categories = {}
     selected_prompt = None
 
@@ -145,6 +148,8 @@ def create_prompts_page(state):
         content_field = ft.TextField(
             label=L['prompt_content'], value=p.get('content', ''), multiline=True, min_lines=5, expand=True,
         )
+        enable_clipboard_paste(name_field)
+        enable_clipboard_paste(content_field)
 
         def save_prompt(e):
             if not name_field.value:

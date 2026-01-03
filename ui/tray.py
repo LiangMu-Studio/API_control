@@ -4,13 +4,15 @@ import threading
 from pathlib import Path
 
 
-def create_tray_icon(state, on_show_window, on_quit):
+def create_tray_icon(state, on_show_window, on_quit, on_screenshot=None, on_copy_path=None):
     """创建系统托盘图标
 
     Args:
         state: 应用状态对象
         on_show_window: 显示主窗口回调
         on_quit: 退出应用回调
+        on_screenshot: 截屏回调
+        on_copy_path: 复制路径回调
     """
     try:
         import pystray
@@ -32,11 +34,18 @@ def create_tray_icon(state, on_show_window, on_quit):
 
     def build_menu():
         """构建托盘菜单"""
-        return [
-            pystray.MenuItem("显示窗口", lambda: on_show_window()),
+        items = [
+            pystray.MenuItem("显示窗口", lambda: on_show_window(), default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("退出", lambda: on_quit()),
         ]
+        if on_screenshot:
+            items.append(pystray.MenuItem("截屏", lambda: on_screenshot()))
+        if on_copy_path:
+            items.append(pystray.MenuItem("复制路径", lambda: on_copy_path()))
+        if on_screenshot or on_copy_path:
+            items.append(pystray.Menu.SEPARATOR)
+        items.append(pystray.MenuItem("退出", lambda: on_quit()))
+        return items
 
     icon = pystray.Icon(
         "AI CLI Manager",
@@ -44,9 +53,6 @@ def create_tray_icon(state, on_show_window, on_quit):
         "AI CLI Manager",
         menu=pystray.Menu(lambda: build_menu())
     )
-
-    # 双击显示窗口
-    icon.on_activate = lambda: on_show_window()
 
     return icon
 

@@ -1,87 +1,42 @@
-"""路径抓取工具 - 点击文件获取绝对路径"""
+"""路径抓取工具 - 点击文件后自动复制路径
 
-import sys
-import subprocess
-import platform
+监听鼠标点击，点击后模拟 Ctrl+Shift+C 复制路径
+"""
 
-def get_file_path() -> str:
-    """跨平台文件选择对话框，返回选中文件的绝对路径"""
-    system = platform.system()
+import ctypes
+import time
 
-    if system == "Windows":
-        # 使用 PowerShell 的文件选择对话框
-        ps_script = '''
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = "选择文件获取路径"
-$dialog.Filter = "所有文件 (*.*)|*.*"
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-    Write-Output $dialog.FileName
-}
-'''
-        result = subprocess.run(
-            ["powershell", "-Command", ps_script],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return result.stdout.strip()
+user32 = ctypes.windll.user32
 
-    elif system == "Darwin":  # macOS
-        result = subprocess.run(
-            ["osascript", "-e", 'POSIX path of (choose file with prompt "选择文件获取路径")'],
-            capture_output=True, text=True
-        )
-        return result.stdout.strip()
-
-    else:  # Linux
-        # 尝试 zenity
-        try:
-            result = subprocess.run(
-                ["zenity", "--file-selection", "--title=选择文件获取路径"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except FileNotFoundError:
-            pass
-        # 尝试 kdialog
-        try:
-            result = subprocess.run(
-                ["kdialog", "--getopenfilename", ".", "*"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except FileNotFoundError:
-            pass
-
-    return ""
+VK_CONTROL = 0x11
+VK_SHIFT = 0x10
+VK_C = 0x43
 
 
-def copy_to_clipboard(text: str):
-    """跨平台复制到剪贴板"""
-    system = platform.system()
-
-    if system == "Windows":
-        subprocess.run(["clip"], input=text.encode('utf-16le'), check=True)
-    elif system == "Darwin":
-        subprocess.run(["pbcopy"], input=text.encode(), check=True)
-    else:
-        # Linux - 尝试 xclip 或 xsel
-        try:
-            subprocess.run(["xclip", "-selection", "clipboard"], input=text.encode(), check=True)
-        except FileNotFoundError:
-            subprocess.run(["xsel", "--clipboard", "--input"], input=text.encode(), check=True)
+def copy_path():
+    """模拟 Ctrl+Shift+C 复制路径"""
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    user32.keybd_event(VK_SHIFT, 0, 0, 0)
+    user32.keybd_event(VK_C, 0, 0, 0)
+    time.sleep(0.05)
+    user32.keybd_event(VK_C, 0, 2, 0)
+    user32.keybd_event(VK_SHIFT, 0, 2, 0)
+    user32.keybd_event(VK_CONTROL, 0, 2, 0)
 
 
-def pick_and_copy() -> str:
-    """选择文件并复制路径到剪贴板，返回路径"""
-    path = get_file_path()
-    if path:
-        copy_to_clipboard(path)
-    return path
+def wait_for_click_and_copy():
+    """监听鼠标点击，点击后复制路径"""
+    from pynput import mouse
+
+    def on_click(x, y, button, pressed):
+        if not pressed and button == mouse.Button.left:
+            time.sleep(0.15)
+            copy_path()
+            return False
+
+    with mouse.Listener(on_click=on_click) as listener:
+        listener.join(timeout=30)
 
 
 if __name__ == "__main__":
-    path = pick_and_copy()
-    if path:
-        print(path)
+    wait_for_click_and_copy()

@@ -212,7 +212,12 @@ def setup_clipboard_paste(page):
     for control in page.controls:
         _scan_and_wrap(control)
 
-    keyboard.add_hotkey('win+v', _on_winv, suppress=False)
+    # 使用低级钩子检测 Win+V（keyboard 库对系统快捷键不可靠）
+    def _keyboard_hook(event):
+        if event.event_type == 'down' and event.name == 'v':
+            if keyboard.is_pressed('win') or keyboard.is_pressed('left windows') or keyboard.is_pressed('right windows'):
+                threading.Thread(target=_on_winv, daemon=True).start()
+    keyboard.hook(_keyboard_hook)
 
 
 def enable_clipboard_paste(field):

@@ -380,6 +380,52 @@ class HistoryManager:
         self.claude_dir = claude_dir
         self.trash_manager = TrashManager(claude_dir)
 
+    def list_projects(self, with_cwd: bool = False, limit: int = 0) -> list:
+        """列出项目文件夹，按最后修改时间倒序
+        with_cwd: 是否同时获取每个项目的cwd（从第一个session读取）
+        limit: 限制返回数量，0表示不限制
+        """
+        projects_dir = self.claude_dir / "projects"
+        if not projects_dir.exists():
+            return []
+        dirs = [d for d in projects_dir.iterdir() if d.is_dir()]
+        dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        if limit > 0:
+            dirs = dirs[:limit]
+        if not with_cwd:
+            return [d.name for d in dirs]
+        # 返回 [(folder_name, cwd), ...]
+        result = []
+        for d in dirs:
+            cwd = ''
+            for f in d.glob("*.jsonl"):
+                try:
+                    with open(f, 'r', encoding='utf-8') as fp:
+                        for line in fp:
+                            if '"cwd"' in line:
+                                import json
+                                data = json.loads(line)
+                                cwd = data.get('cwd', '')
+                                break
+                    if cwd:
+                        break
+                except:
+                    pass
+            result.append((d.name, cwd))
+        return result
+
+    def load_project(self, project_name: str) -> dict:
+        """加载单个项目的会话"""
+        project_dir = self.claude_dir / "projects" / project_name
+        result = {}
+        if not project_dir.exists():
+            return result
+        for session_file in project_dir.glob("*.jsonl"):
+            info = self._parse_session(session_file)
+            if info:
+                result[session_file.stem] = info
+        return result
+
     def load_sessions(self, callback=None) -> dict:
         projects_dir = self.claude_dir / "projects"
         result = {}
@@ -394,8 +440,6 @@ class HistoryManager:
             project_name = project_dir.name
             result[project_name] = {}
             for session_file in project_dir.glob("*.jsonl"):
-                if session_file.name.startswith("agent-"):
-                    continue
                 session_id = session_file.stem
                 info = self._parse_session(session_file)
                 if info:
@@ -433,9 +477,34 @@ class HistoryManager:
         except (OSError, json.JSONDecodeError):
             return None
 
+    def _extract_text(self, content) -> str:
+        """从消息内容提取文本"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, dict):
+            text = ""
+            for c in content.get('content', []):
+                if isinstance(c, dict) and c.get('type') == 'text':
+                    text += c.get('text', '')
+            return text
+        return str(content)
+
     def delete_session(self, project_name: str, session_id: str, info: dict) -> bool:
         file_history_dir = info['file'].parent / "file-history" / session_id
         return self.trash_manager.move_to_trash(session_id, project_name, info['file'], file_history_dir if file_history_dir.exists() else None)
+
+    def delete_sessions_by_cwd(self, cwd: str) -> int:
+        """删除指定工作目录下的所有会话（移到回收站）"""
+        cwd_norm = Path(cwd).resolve().as_posix().lower().rstrip('/')
+        cnt = 0
+        for project_name in self.list_projects():
+            sessions = self.load_project(project_name)
+            for sid, info in sessions.items():
+                session_cwd = info.get('cwd', '')
+                if session_cwd and Path(session_cwd).resolve().as_posix().lower().rstrip('/') == cwd_norm:
+                    if self.delete_session(project_name, sid, info):
+                        cnt += 1
+        return cnt
 
     def export_to_markdown(self, session_id: str, info: dict) -> str:
         lines = [f"# Claude 会话: {session_id}\n", f"路径: {info.get('cwd', '未知')}\n\n---\n\n"]
@@ -451,6 +520,7 @@ class HistoryManager:
                 text = str(content)
             lines.append(f"## {role.upper()}\n\n{text}\n\n---\n\n")
         return ''.join(lines)
+
 
 
 # ========== Codex 历史记录管理器 ==========

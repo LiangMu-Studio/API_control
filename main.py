@@ -91,10 +91,18 @@ def main(page: ft.Page):
     page.bgcolor = theme['bg']
     page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
 
-    # 最小化到托盘
+    # 窗口控制按钮
     def minimize_to_tray(_):
         page.window.minimized = True
         page.window.skip_task_bar = True
+        page.update()
+
+    def do_minimize(_):
+        page.window.minimized = True
+        page.update()
+
+    def do_maximize(_):
+        page.window.maximized = not page.window.maximized
         page.update()
 
     # 自定义标题栏
@@ -104,10 +112,8 @@ def main(page: ft.Page):
                 ft.Icon(ft.Icons.TERMINAL, size=18, color=theme["text"]),
                 ft.Text(f"AI CLI Manager v{VERSION}", size=14, color=theme["text"], weight=ft.FontWeight.BOLD),
                 ft.Container(expand=True),
-                ft.IconButton(ft.Icons.MINIMIZE, icon_size=16, icon_color=theme["text_sec"],
-                             on_click=lambda _: setattr(page.window, 'minimized', True) or page.update()),
-                ft.IconButton(ft.Icons.CROP_SQUARE, icon_size=16, icon_color=theme["text_sec"],
-                             on_click=lambda _: setattr(page.window, 'maximized', not page.window.maximized) or page.update()),
+                ft.IconButton(ft.Icons.MINIMIZE, icon_size=16, icon_color=theme["text_sec"], on_click=do_minimize),
+                ft.IconButton(ft.Icons.CROP_SQUARE, icon_size=16, icon_color=theme["text_sec"], on_click=do_maximize),
                 ft.IconButton(ft.Icons.CLOSE, icon_size=16, icon_color=theme["text_sec"],
                              on_click=minimize_to_tray, tooltip=L.get('minimize_to_tray', '最小化到托盘')),
             ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER),

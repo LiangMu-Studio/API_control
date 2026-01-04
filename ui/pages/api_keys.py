@@ -109,18 +109,6 @@ def create_api_page(state):
     # 工作目录历史记录
     work_dir_history = state.settings.get('work_dir_history', [])
     current_work_dir = state.settings.get('work_dir', '')
-    # 只有历史为空时，才从 Claude Code 历史导入初始目录
-    if not work_dir_history and history_manager:
-        for pname in history_manager.list_projects(limit=10):
-            cwd = history_manager.get_project_cwd(pname)
-            if cwd and Path(cwd).is_dir() and cwd not in work_dir_history:
-                work_dir_history.append(cwd)
-            if len(work_dir_history) >= 5:
-                break
-        state.settings['work_dir_history'] = work_dir_history
-        state.settings['work_dir'] = work_dir_history[-1] if work_dir_history else ''
-        current_work_dir = state.settings['work_dir']
-        save_settings(state.settings)
 
     # 共享 FilePicker（避免重复创建）
     file_picker = ft.FilePicker()
@@ -147,6 +135,29 @@ def create_api_page(state):
         work_dir_history.append(path)
         state.settings['work_dir_history'] = work_dir_history[-10:]
         save_settings(state.settings)
+
+    # 后台初始化工作目录历史（不阻塞 UI）
+    def init_workdir_history_bg():
+        if work_dir_history or not history_manager:
+            return
+        for pname in history_manager.list_projects(limit=10):
+            cwd = history_manager.get_project_cwd(pname)
+            if cwd and Path(cwd).is_dir() and cwd not in work_dir_history:
+                work_dir_history.append(cwd)
+            if len(work_dir_history) >= 5:
+                break
+        if work_dir_history:
+            state.settings['work_dir_history'] = work_dir_history
+            state.settings['work_dir'] = work_dir_history[-1]
+            save_settings(state.settings)
+            # 更新 UI
+            def update_ui():
+                work_dir_dropdown.value = work_dir_history[-1]
+                work_dir_dropdown.options = build_workdir_options()
+                page.update()
+            page.run_thread(update_ui)
+    import threading
+    threading.Thread(target=init_workdir_history_bg, daemon=True).start()
 
     def clear_workdir_history(e):
         current = work_dir_dropdown.value
@@ -185,14 +196,11 @@ def create_api_page(state):
         cli_type = get_selected_cli_type()
 
         if cli_type == 'codex' and codex_history_manager and cwd:
-            # Codex CLI 历史
+            # Codex CLI 历史 - 只加载指定 cwd 的会话
             sessions = []
-            all_sessions = codex_history_manager.load_sessions()
-            for date_group, group_sessions in all_sessions.items():
-                for sid, info in group_sessions.items():
-                    if info.get('cwd') and Path(info['cwd']).resolve() == Path(cwd).resolve():
-                        ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
-                        sessions.append((ts, sid, info['file']))
+            for sid, info in codex_history_manager.load_project(cwd).items():
+                ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
+                sessions.append((ts, sid, info['file']))
             sessions.sort()
             for ts, sid, fpath in sessions:
                 opts.append(ft.dropdown.Option(key=str(fpath), text=f"{ts} | {sid[:12]}"[:50]))
@@ -270,6 +278,31 @@ def create_api_page(state):
 
     session_preview_btn = ft.IconButton(ft.Icons.PREVIEW, tooltip="预览最后对话", on_click=show_session_preview)
 
+    _session_loaded = [False]
+    _session_loading = [False]  # 防止重复加载
+
+    def refresh_session_dropdown_async():
+        """后台异步加载会话列表"""
+        if _session_loading[0]:
+            return
+        _session_loading[0] = True
+        cwd = work_dir_dropdown.value
+
+        def do_load():
+            opts = build_session_options(cwd)
+            def update_ui():
+                session_dropdown.options = opts
+                session_dropdown.value = '__none__'
+                if len(opts) > 1:
+                    session_dropdown.value = opts[-2].key
+                _session_loaded[0] = True
+                _session_loading[0] = False
+                page.update()
+            page.run_thread(update_ui)
+
+        import threading
+        threading.Thread(target=do_load, daemon=True).start()
+
     def refresh_session_dropdown():
         cwd = work_dir_dropdown.value
         session_dropdown.options = build_session_options(cwd)
@@ -277,17 +310,22 @@ def create_api_page(state):
         # 默认选中最新会话（最后一个非 __none__ 选项）
         if len(session_dropdown.options) > 1:
             session_dropdown.value = session_dropdown.options[-2].key
+        _session_loaded[0] = True
         page.update()
 
     # 工作目录变化时刷新会话列表
     def on_workdir_change(e):
         save_work_dir(e.control.value)
-        refresh_session_dropdown()
+        _session_loaded[0] = False  # 重置加载状态
+        refresh_session_dropdown_async()
 
     work_dir_dropdown.on_change = on_workdir_change
 
-    # 初始化时加载会话列表
-    refresh_session_dropdown()
+    # 懒加载：点击会话下拉框时才加载
+    def on_session_focus(e):
+        if not _session_loaded[0]:
+            refresh_session_dropdown_async()
+    session_dropdown.on_focus = on_session_focus
 
     # 提示词下拉
     def build_prompt_options():
@@ -345,7 +383,8 @@ def create_api_page(state):
         state.settings['last_selected_config'] = idx
         save_settings(state.settings)
         # 根据 cli_type 刷新会话列表
-        refresh_session_dropdown()
+        _session_loaded[0] = False
+        refresh_session_dropdown_async()
         _update_selection()
         page.update()
 
@@ -863,7 +902,8 @@ def create_api_page(state):
                 work_dir_dropdown.value = result.path
                 save_work_dir(result.path)
                 work_dir_dropdown.options = build_workdir_options()
-                page.update()
+                _session_loaded[0] = False
+                refresh_session_dropdown_async()  # 刷新会话列表
         file_picker.on_result = on_result
         file_picker.get_directory_path(initial_directory=work_dir_dropdown.value or None)
 
@@ -1254,12 +1294,11 @@ def create_api_page(state):
     # 初始化列表
     refresh_config_list()
 
-    # 恢复上次选中的 KEY
+    # 恢复上次选中的 KEY（不加载会话，懒加载）
     last_idx = state.settings.get('last_selected_config')
     if last_idx is not None and 0 <= last_idx < len(state.configs):
         state.select_config(last_idx)
         _update_selection()
-        refresh_session_dropdown()
 
     # 构建页面
     api_page = ft.Column([

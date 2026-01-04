@@ -540,67 +540,95 @@ class HistoryManager:
 
 
 # ========== Codex 历史记录管理器 ==========
+# 尝试导入 Cython 加速模块
+try:
+    from core.fast_scan import scan_codex_sessions, get_cwd_fast, load_project_fast
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+    load_project_fast = None
+
 class CodexHistoryManager:
     def __init__(self, codex_dir: Path):
         self.codex_dir = codex_dir
         self.trash_manager = TrashManager(codex_dir)
+        self._cwd_cache = {}  # cwd -> mtime 缓存
 
-    def list_projects(self, with_cwd: bool = False, limit: int = 0) -> list:
-        """列出日期分组，按最后修改时间倒序"""
-        sessions_dir = self.codex_dir / "sessions"
-        if not sessions_dir.exists():
-            return []
-        # 收集所有日期分组
-        date_groups = {}
-        for session_file in sessions_dir.rglob("*.jsonl"):
-            parts = session_file.relative_to(sessions_dir).parts
-            if len(parts) >= 3:
-                date_group = f"{parts[0]}-{parts[1]}-{parts[2]}"
-            else:
-                date_group = "未知日期"
-            mtime = session_file.stat().st_mtime
-            if date_group not in date_groups or mtime > date_groups[date_group]:
-                date_groups[date_group] = mtime
-        # 按修改时间倒序
-        sorted_groups = sorted(date_groups.keys(), key=lambda x: date_groups[x], reverse=True)
+    def _get_cwd(self, f: Path) -> str:
+        if _USE_CYTHON:
+            return get_cwd_fast(str(f))
+        try:
+            with open(f, 'r', encoding='utf-8') as fp:
+                for line in fp:
+                    if '"cwd"' in line:
+                        data = json.loads(line)
+                        return data.get('payload', {}).get('cwd', '') or data.get('cwd', '')
+        except:
+            pass
+        return ''
+
+    def list_projects(self, with_cwd: bool = False, limit: int = 0, on_update=None) -> list:
+        """列出工作目录分组，使用 Cython 加速"""
+        sessions_dir = str(self.codex_dir / "sessions")
+        if _USE_CYTHON:
+            self._cwd_cache = scan_codex_sessions(sessions_dir, limit)
+        else:
+            # 纯 Python 回退
+            self._cwd_cache = self._scan_sessions_py(sessions_dir, limit)
+        sorted_cwds = sorted(self._cwd_cache.keys(), key=lambda x: self._cwd_cache[x], reverse=True)
         if limit > 0:
-            sorted_groups = sorted_groups[:limit]
+            sorted_cwds = sorted_cwds[:limit]
         if not with_cwd:
-            return sorted_groups
-        # 返回 [(date_group, cwd), ...]
-        result = []
-        for grp in sorted_groups:
-            cwd = ''
-            for f in sessions_dir.rglob("*.jsonl"):
-                parts = f.relative_to(sessions_dir).parts
-                if len(parts) >= 3 and f"{parts[0]}-{parts[1]}-{parts[2]}" == grp:
-                    try:
-                        with open(f, 'r', encoding='utf-8') as fp:
-                            for line in fp:
-                                if '"cwd"' in line:
-                                    data = json.loads(line)
-                                    cwd = data.get('payload', {}).get('cwd', '') or data.get('cwd', '')
-                                    break
-                        if cwd:
-                            break
-                    except:
-                        pass
-            result.append((grp, cwd))
-        return result
+            return sorted_cwds
+        return [(cwd, cwd) for cwd in sorted_cwds]
 
-    def load_project(self, date_group: str) -> dict:
-        """加载指定日期分组的会话"""
+    def _scan_sessions_py(self, sessions_dir: str, limit: int) -> dict:
+        """纯 Python 回退扫描"""
+        import os
+        cwd_map = {}
+        if not os.path.isdir(sessions_dir):
+            return cwd_map
+        count = 0
+        for year in sorted(os.listdir(sessions_dir), reverse=True):
+            yp = os.path.join(sessions_dir, year)
+            if not os.path.isdir(yp): continue
+            for month in sorted(os.listdir(yp), reverse=True):
+                mp = os.path.join(yp, month)
+                if not os.path.isdir(mp): continue
+                for day in sorted(os.listdir(mp), reverse=True):
+                    dp = os.path.join(mp, day)
+                    if not os.path.isdir(dp): continue
+                    for f in os.listdir(dp):
+                        if not f.endswith('.jsonl'): continue
+                        fp = os.path.join(dp, f)
+                        cwd = self._get_cwd(Path(fp)) or "未知目录"
+                        mtime = os.path.getmtime(fp)
+                        if cwd not in cwd_map:
+                            cwd_map[cwd] = mtime
+                            count += 1
+                            if limit > 0 and count >= limit:
+                                return cwd_map
+                        elif mtime > cwd_map[cwd]:
+                            cwd_map[cwd] = mtime
+        return cwd_map
+
+    def load_project(self, cwd_path: str) -> dict:
+        """加载指定工作目录的会话"""
         sessions_dir = self.codex_dir / "sessions"
-        result = {}
         if not sessions_dir.exists():
+            return {}
+        # 使用 Cython 加速
+        if _USE_CYTHON and load_project_fast:
+            raw = load_project_fast(str(sessions_dir), cwd_path)
+            result = {}
+            for sid, info in raw.items():
+                result[sid] = {'file': Path(info['file']), 'last_timestamp': info['last_timestamp']}
             return result
+        # 纯 Python 回退
+        result = {}
         for session_file in sessions_dir.rglob("*.jsonl"):
-            parts = session_file.relative_to(sessions_dir).parts
-            if len(parts) >= 3:
-                grp = f"{parts[0]}-{parts[1]}-{parts[2]}"
-            else:
-                grp = "未知日期"
-            if grp != date_group:
+            cwd = self._get_cwd(session_file)
+            if cwd != cwd_path and (not cwd and cwd_path != "未知目录"):
                 continue
             session_id = session_file.stem.replace("rollout-", "")
             info = self._parse_session(session_file)

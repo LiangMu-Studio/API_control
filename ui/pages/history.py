@@ -131,8 +131,8 @@ def create_history_page(state):
         history_progress.value = 0
         state.page.update()
 
-        # 只获取项目列表（快速）
-        projects = mgr.list_projects() if hasattr(mgr, 'list_projects') else []
+        # 快速获取前50个项目（按日期倒序，不会卡住）
+        projects = mgr.list_projects(limit=50) if hasattr(mgr, 'list_projects') else []
         if not projects:
             history_stats.value = L['history_no_records']
             history_progress.visible = False
@@ -141,11 +141,9 @@ def create_history_page(state):
 
         history_stats.value = f"{L.get('history_projects', '项目')}: {len(projects)}"
 
-        # 快速获取前10个项目的cwd
-        if mgr:
-            projects_with_cwd = mgr.list_projects(with_cwd=True, limit=10)
-            cwd_map = {name: cwd for name, cwd in projects_with_cwd}
-        else:
+        # cwd_map 直接用 projects（Codex 的 list_projects 返回的就是 cwd）
+        cwd_map = {p: p for p in projects}
+        if mgr == history_manager:
             cwd_map = {}
 
         total = len(projects)

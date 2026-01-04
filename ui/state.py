@@ -30,9 +30,11 @@ class AppState:
         self.prompts = self.prompt_db.get_all()
         self.mcp_list = load_mcp()
 
-        # 终端和环境缓存
-        self.terminals = self.settings.get('terminals_cache', {})
-        self.python_envs = self.settings.get('envs_cache', {})
+        # 终端和环境缓存（确保是字典类型，兼容旧版列表格式）
+        terminals_cache = self.settings.get('terminals_cache', {})
+        self.terminals = terminals_cache if isinstance(terminals_cache, dict) else {}
+        envs_cache = self.settings.get('envs_cache', {})
+        self.python_envs = envs_cache if isinstance(envs_cache, dict) else {}
 
         # 选择状态
         self.selected_config = None

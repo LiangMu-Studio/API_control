@@ -414,6 +414,22 @@ class HistoryManager:
             result.append((d.name, cwd))
         return result
 
+    def get_project_cwd(self, project_name: str) -> str:
+        """获取项目的工作目录"""
+        project_dir = self.claude_dir / "projects" / project_name
+        if not project_dir.exists():
+            return ''
+        for f in project_dir.glob("*.jsonl"):
+            try:
+                with open(f, 'r', encoding='utf-8') as fp:
+                    for line in fp:
+                        if '"cwd"' in line:
+                            data = json.loads(line)
+                            return data.get('cwd', '')
+            except:
+                pass
+        return ''
+
     def load_project(self, project_name: str) -> dict:
         """加载单个项目的会话"""
         project_dir = self.claude_dir / "projects" / project_name

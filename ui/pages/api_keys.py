@@ -15,6 +15,7 @@ from ..common import (
     show_snackbar
 )
 from ..clipboard_paste import enable_clipboard_paste
+from ..database import history_manager, codex_history_manager
 
 # 辅助函数：从配置获取 cli_type（兼容新旧格式）
 def get_cli_type(cfg):
@@ -108,15 +109,25 @@ def create_api_page(state):
     # 工作目录历史记录
     work_dir_history = state.settings.get('work_dir_history', [])
     current_work_dir = state.settings.get('work_dir', '')
-    if current_work_dir and current_work_dir not in work_dir_history:
-        work_dir_history.insert(0, current_work_dir)
+    # 只有历史为空时，才从 Claude Code 历史导入初始目录
+    if not work_dir_history and history_manager:
+        for pname in history_manager.list_projects(limit=10):
+            cwd = history_manager.get_project_cwd(pname)
+            if cwd and Path(cwd).is_dir() and cwd not in work_dir_history:
+                work_dir_history.append(cwd)
+            if len(work_dir_history) >= 5:
+                break
+        state.settings['work_dir_history'] = work_dir_history
+        state.settings['work_dir'] = work_dir_history[-1] if work_dir_history else ''
+        current_work_dir = state.settings['work_dir']
+        save_settings(state.settings)
 
     # 共享 FilePicker（避免重复创建）
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
     def build_workdir_options():
-        opts = [ft.dropdown.Option(d, d[-50:] if len(d) > 50 else d) for d in work_dir_history[:10]]
+        opts = [ft.dropdown.Option(d, d[-50:] if len(d) > 50 else d) for d in reversed(work_dir_history[-10:])]
         return opts
 
     work_dir_dropdown = ft.Dropdown(
@@ -131,19 +142,152 @@ def create_api_page(state):
         if not path:
             return
         state.settings['work_dir'] = path
-        if path not in work_dir_history:
-            work_dir_history.insert(0, path)
-        state.settings['work_dir_history'] = work_dir_history[:10]
+        if path in work_dir_history:
+            work_dir_history.remove(path)
+        work_dir_history.append(path)
+        state.settings['work_dir_history'] = work_dir_history[-10:]
         save_settings(state.settings)
 
     def clear_workdir_history(e):
-        work_dir_history.clear()
-        state.settings['work_dir_history'] = []
-        save_settings(state.settings)
-        work_dir_dropdown.options = []
-        work_dir_dropdown.value = None
-        show_snackbar(page, L.get('history_cleared', '历史已清空'))
+        current = work_dir_dropdown.value
+        if not current or current not in work_dir_history:
+            return
+        def do_clear(_):
+            page.close(dlg)
+            cnt = history_manager.delete_sessions_by_cwd(current) if history_manager else 0
+            work_dir_history.remove(current)
+            state.settings['work_dir_history'] = work_dir_history[-10:]
+            save_settings(state.settings)
+            work_dir_dropdown.options = build_workdir_options()
+            work_dir_dropdown.value = work_dir_history[-1] if work_dir_history else None
+            state.settings['work_dir'] = work_dir_dropdown.value
+            save_settings(state.settings)
+            show_snackbar(page, L.get('history_cleared_with_sessions', '已删除: {} ({}个会话移到回收站)').format(current[-30:], cnt))
+            page.update()
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('confirm_delete', '确认删除')),
+            content=ft.Text(L.get('confirm_clear_folder_history', '是否要删除本文件夹历史记录？')),
+            actions=[ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: page.close(dlg)), ft.TextButton(L.get('confirm', '确认'), on_click=do_clear)]
+        )
+        page.open(dlg)
+
+    # 会话恢复下拉框
+    def get_selected_cli_type():
+        """获取当前选中 KEY 的 cli_type"""
+        if state.selected_config is not None and state.selected_config < len(state.configs):
+            return get_cli_type(state.configs[state.selected_config])
+        return 'claude'
+
+    def build_session_options(cwd):
+        """构建会话选项列表（根据选中 KEY 的 cli_type 加载对应历史）"""
+        opts = []
+        state._current_project = None
+        cli_type = get_selected_cli_type()
+
+        if cli_type == 'codex' and codex_history_manager and cwd:
+            # Codex CLI 历史
+            sessions = []
+            all_sessions = codex_history_manager.load_sessions()
+            for date_group, group_sessions in all_sessions.items():
+                for sid, info in group_sessions.items():
+                    if info.get('cwd') and Path(info['cwd']).resolve() == Path(cwd).resolve():
+                        ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
+                        sessions.append((ts, sid, info['file']))
+            sessions.sort()
+            for ts, sid, fpath in sessions:
+                opts.append(ft.dropdown.Option(key=str(fpath), text=f"{ts} | {sid[:12]}"[:50]))
+        elif cli_type == 'claude' and history_manager and cwd:
+            # Claude Code 历史
+            cwd_key = Path(cwd).name.lower().replace(' ', '-').replace('.', '-').replace('_', '-')
+            for pname in history_manager.list_projects(limit=30):
+                if cwd_key.replace('-', '') in pname.lower().replace('-', ''):
+                    state._current_project = pname
+                    break
+            if state._current_project:
+                sessions = []
+                for sid, info in history_manager.load_project(state._current_project).items():
+                    ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
+                    sessions.append((ts, sid))
+                sessions.sort()
+                for ts, sid in sessions:
+                    opts.append(ft.dropdown.Option(key=sid, text=f"{ts} | {sid[:12]}"[:50]))
+        opts.append(ft.dropdown.Option(key='__none__', text=L.get('no_old_session', '不加载旧对话')))
+        return opts
+
+    session_dropdown = ft.Dropdown(
+        label=L.get('session_resume', '恢复会话'),
+        options=[ft.dropdown.Option(key='__none__', text=L.get('no_old_session', '不加载旧对话'))],
+        value='__none__',
+        width=400,
+    )
+
+    def show_session_preview(_):
+        sid = session_dropdown.value
+        if sid == '__none__':
+            show_snackbar(page, L.get('no_session_selected', '请先选择一个会话'))
+            return
+        if not getattr(state, '_current_project', None):
+            show_snackbar(page, L.get('no_project_found', '未找到匹配的项目'))
+            return
+        # 加载该会话的完整数据
+        sessions = history_manager.load_project(state._current_project)
+        info = sessions.get(sid)
+        if not info:
+            return
+        # 提取最后一轮对话
+        messages = info.get('messages', [])
+        last_user_txt, last_ai_txt = '', ''
+        for m in reversed(messages):
+            msg_type = m.get('type')  # 'user' 或 'assistant'
+            # Claude JSONL: message.content 是数组
+            msg_obj = m.get('message', {})
+            if isinstance(msg_obj, dict):
+                for x in msg_obj.get('content', []):
+                    if isinstance(x, dict) and x.get('type') == 'text':
+                        txt = x.get('text', '')
+                        if msg_type == 'assistant' and not last_ai_txt:
+                            last_ai_txt = txt[:500]
+                        elif msg_type == 'user' and not last_user_txt and not txt.startswith('<'):
+                            last_user_txt = txt[:500]
+            if last_user_txt and last_ai_txt:
+                break
+        # 显示弹窗
+        dlg = ft.AlertDialog(
+            title=ft.Text(f"会话: {sid[:30]}"),
+            content=ft.Container(
+                ft.Column([
+                    ft.Text("👤 用户:", weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE),
+                    ft.Text(last_user_txt or '(无)', selectable=True),
+                    ft.Divider(),
+                    ft.Text("🤖 AI:", weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN),
+                    ft.Text(last_ai_txt or '(无)', selectable=True),
+                ], scroll=ft.ScrollMode.AUTO),
+                width=550, height=350,
+            ),
+            actions=[ft.TextButton("关闭", on_click=lambda _: page.close(dlg))],
+        )
+        page.open(dlg)
+
+    session_preview_btn = ft.IconButton(ft.Icons.PREVIEW, tooltip="预览最后对话", on_click=show_session_preview)
+
+    def refresh_session_dropdown():
+        cwd = work_dir_dropdown.value
+        session_dropdown.options = build_session_options(cwd)
+        session_dropdown.value = '__none__'
+        # 默认选中最新会话（最后一个非 __none__ 选项）
+        if len(session_dropdown.options) > 1:
+            session_dropdown.value = session_dropdown.options[-2].key
         page.update()
+
+    # 工作目录变化时刷新会话列表
+    def on_workdir_change(e):
+        save_work_dir(e.control.value)
+        refresh_session_dropdown()
+
+    work_dir_dropdown.on_change = on_workdir_change
+
+    # 初始化时加载会话列表
+    refresh_session_dropdown()
 
     # 提示词下拉
     def build_prompt_options():
@@ -197,6 +341,11 @@ def create_api_page(state):
         _last_click["config"] = idx
         _last_click["time"] = now
         state.select_config(idx)
+        # 保存选中的配置索引
+        state.settings['last_selected_config'] = idx
+        save_settings(state.settings)
+        # 根据 cli_type 刷新会话列表
+        refresh_session_dropdown()
         _update_selection()
         page.update()
 
@@ -761,10 +910,18 @@ def create_api_page(state):
         print(f"[DEBUG] model={selected_model}")
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
         cwd = work_dir_dropdown.value or None
+        # 验证工作目录是否存在
+        if cwd and not Path(cwd).is_dir():
+            show_snackbar(page, L.get('invalid_workdir', '工作目录不存在: {}').format(cwd))
+            return
         cli_cmd = cli_info.get('command', 'claude')
         # 如果配置了模型，添加 --model 参数
         if selected_model:
             cli_cmd = f"{cli_cmd} --model {selected_model}"
+        # 如果选择了会话，添加 --resume 参数（仅 claude CLI）
+        session_id = session_dropdown.value
+        if cli_type == 'claude' and session_id and session_id != '__none__':
+            cli_cmd = f"{cli_cmd} --resume {session_id}"
         if sys.platform == 'win32':
             # Gemini CLI 需要永久环境变量，其他 CLI 用临时变量
             if cli_type == 'gemini':
@@ -1097,6 +1254,13 @@ def create_api_page(state):
     # 初始化列表
     refresh_config_list()
 
+    # 恢复上次选中的 KEY
+    last_idx = state.settings.get('last_selected_config')
+    if last_idx is not None and 0 <= last_idx < len(state.configs):
+        state.select_config(last_idx)
+        _update_selection()
+        refresh_session_dropdown()
+
     # 构建页面
     api_page = ft.Column([
         ft.Row([
@@ -1124,8 +1288,8 @@ def create_api_page(state):
             ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),
         ft.Row([work_dir_dropdown, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
-                ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_history', '清空历史'), on_click=clear_workdir_history),
-                ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
+                ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history)]),
+        ft.Row([session_dropdown, session_preview_btn, ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
         ft.Row([
             prompt_dropdown,
             ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),

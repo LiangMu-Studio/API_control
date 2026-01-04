@@ -2,23 +2,28 @@
 
 import time
 import base64
-from typing import Union
-from PySide6.QtCore import QThread, Signal  # noqa: F401
+import threading
+from typing import Callable
 from services.api_services.base_service import BaseAPIService
 
 
-class FileProcessWorker(QThread):
+class FileProcessWorker:
     """文件处理工作线程 - 异步处理文件上传"""
 
-    attachments_ready = Signal(list)
-    error_occurred = Signal(str)
-
     def __init__(self, files: list, should_compress: bool = True):
-        super().__init__()
         self.files = files
         self.should_compress = should_compress
+        self._thread = None
+        # 回调函数
+        self.on_attachments_ready: Callable[[list], None] = None
+        self.on_error: Callable[[str], None] = None
 
-    def run(self):
+    def start(self):
+        """启动线程"""
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
         """处理文件"""
         try:
             from core.file_handler import FileHandler
@@ -53,19 +58,18 @@ class FileProcessWorker(QThread):
                         })
 
                 except Exception as e:
-                    self.error_occurred.emit(f"处理文件 {Path(file_path).name} 失败: {str(e)}")
+                    if self.on_error:
+                        self.on_error(f"处理文件 {Path(file_path).name} 失败: {str(e)}")
 
-            self.attachments_ready.emit(attachments)
+            if self.on_attachments_ready:
+                self.on_attachments_ready(attachments)
         except Exception as e:
-            self.error_occurred.emit(f"文件处理错误: {str(e)}")
+            if self.on_error:
+                self.on_error(f"文件处理错误: {str(e)}")
 
 
-class ChatWorker(QThread):
+class ChatWorker:
     """聊天工作线程"""
-
-    response_chunk = Signal(str)
-    response_ready = Signal()
-    error_occurred = Signal(str)
 
     def __init__(
         self,
@@ -76,7 +80,6 @@ class ChatWorker(QThread):
         timeout: int = 120,
         thinking_mode: str = None,
     ):
-        super().__init__()
         self.service = service
         self.message = message
         self.attachments = attachments or []
@@ -85,8 +88,18 @@ class ChatWorker(QThread):
         self.is_running = True
         self.timeout = timeout
         self.start_time = None
+        self._thread = None
+        # 回调函数
+        self.on_response_chunk: Callable[[str], None] = None
+        self.on_response_ready: Callable[[], None] = None
+        self.on_error: Callable[[str], None] = None
 
-    def run(self):
+    def start(self):
+        """启动线程"""
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
         """Run worker thread"""
         try:
             self.start_time = time.time()
@@ -111,7 +124,8 @@ class ChatWorker(QThread):
                     if elapsed > self.timeout:
                         error_msg = f"API timeout ({self.timeout}s)"
                         print(f"[WORKER] Timeout: {error_msg}")
-                        self.error_occurred.emit(error_msg)
+                        if self.on_error:
+                            self.on_error(error_msg)
                         return
                     has_output = True
                     print(f"[WORKER] First chunk received after {elapsed:.2f}s")
@@ -121,12 +135,12 @@ class ChatWorker(QThread):
                 current_time = time.time()
                 time_since_last = current_time - last_emit_time
                 # Emit batched chunks every 200ms or when buffer is large (500 chars)
-                # 减少UI更新频率,防止主线程过载
                 if time_since_last > 0.2 or len(buffer) > 500:
                     print(f"[WORKER] Emitting batch: {len(buffer)} chars ({chunk_count} chunks, {time_since_last:.3f}s since last)")
                     try:
-                        self.response_chunk.emit(buffer)
-                        print(f"[WORKER] Batch emitted successfully")
+                        if self.on_response_chunk:
+                            self.on_response_chunk(buffer)
+                        print("[WORKER] Batch emitted successfully")
                     except Exception as e:
                         print(f"[WORKER] Error emitting batch: {e}")
                         import traceback
@@ -137,15 +151,18 @@ class ChatWorker(QThread):
             # Emit remaining buffer
             if buffer:
                 print(f"[WORKER] Emitting final buffer: {len(buffer)} chars")
-                self.response_chunk.emit(buffer)
+                if self.on_response_chunk:
+                    self.on_response_chunk(buffer)
             print(f"[WORKER] Stream complete, total chunks: {chunk_count}")
-            self.response_ready.emit()
-        except Exception as e:  # noqa: BLE001
+            if self.on_response_ready:
+                self.on_response_ready()
+        except Exception as e:
             error_msg = str(e)
             print(f"[WORKER] Error: {error_msg}")
             import traceback
             traceback.print_exc()
-            self.error_occurred.emit(error_msg)
+            if self.on_error:
+                self.on_error(error_msg)
 
     def stop(self):
         """Stop worker thread"""

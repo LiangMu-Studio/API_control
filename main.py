@@ -91,19 +91,47 @@ def main(page: ft.Page):
     page.bgcolor = theme['bg']
     page.theme_mode = ft.ThemeMode.DARK if state.theme_mode == 'dark' else ft.ThemeMode.LIGHT
 
-    # 窗口控制按钮
+    # 窗口控制按钮（使用 Windows API 直接操作）
+    def get_hwnd():
+        """获取当前窗口句柄"""
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        found = [None]
+        def cb(hwnd, _):
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                if f"AI CLI Manager v{VERSION}" in buf.value:
+                    found[0] = hwnd
+                    return False
+            return True
+        ctypes.windll.user32.EnumWindows(EnumWindowsProc(cb), 0)
+        return found[0]
+
+    _hwnd_cache = [None]
+
     def minimize_to_tray(_):
-        page.window.minimized = True
+        hwnd = _hwnd_cache[0] or get_hwnd()
+        _hwnd_cache[0] = hwnd
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
         page.window.skip_task_bar = True
         page.update()
 
     def do_minimize(_):
-        page.window.minimized = True
-        page.update()
+        hwnd = _hwnd_cache[0] or get_hwnd()
+        _hwnd_cache[0] = hwnd
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
 
     def do_maximize(_):
-        page.window.maximized = not page.window.maximized
-        page.update()
+        hwnd = _hwnd_cache[0] or get_hwnd()
+        _hwnd_cache[0] = hwnd
+        if hwnd:
+            if ctypes.windll.user32.IsZoomed(hwnd):
+                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            else:
+                ctypes.windll.user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
 
     # 自定义标题栏
     title_bar = ft.WindowDragArea(

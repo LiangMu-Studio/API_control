@@ -3,34 +3,25 @@
 """
 
 import os
-import time
+import threading
 from pathlib import Path
-from typing import Optional, Callable
-from PySide6.QtCore import QObject, QTimer, QFileSystemWatcher, Signal
+from typing import Optional, Callable, List
 
 
-class ConfigRefreshManager(QObject):
+class ConfigRefreshManager:
     """配置文件自动刷新管理器"""
 
-    # 信号定义
-    config_changed = Signal()  # 配置文件变化信号
-    refresh_triggered = Signal()  # 刷新触发信号
-
-    def __init__(self, config_path: Optional[str] = None, parent=None):
-        super().__init__(parent)
+    def __init__(self, config_path: Optional[str] = None):
         self.config_path = config_path or self._get_default_config_path()
-        self.watcher = QFileSystemWatcher()
-        self.refresh_timer = QTimer()
-        self.refresh_delay = 1000  # 1秒延迟
+        self.refresh_delay = 1.0  # 1秒延迟
         self.is_initialized = False
         self.last_modified_time = 0
-
-        # 防抖设置
-        self.refresh_timer.setSingleShot(True)
-        self.refresh_timer.timeout.connect(self._perform_refresh)
-
-        # 状态跟踪
         self._is_running = False
+        self._timer: Optional[threading.Timer] = None
+        self._watch_thread: Optional[threading.Thread] = None
+        # 回调函数
+        self.on_config_changed: Callable[[], None] = None
+        self.on_refresh_triggered: Callable[[], None] = None
 
         self.init()
 
@@ -45,61 +36,54 @@ class ConfigRefreshManager(QObject):
             print(f"警告: 配置文件不存在: {self.config_path}")
             return
 
-        # 获取文件最后修改时间
         self.last_modified_time = os.path.getmtime(self.config_path)
-
-        # 添加文件监控
-        self.watcher.addPath(self.config_path)
-
-        # 连接信号
-        self.watcher.fileChanged.connect(self._on_file_changed)
-
         self.is_initialized = True
         self._is_running = True
 
+        # 启动文件监控线程
+        self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True)
+        self._watch_thread.start()
+
         print(f"配置文件监控已启动: {self.config_path}")
 
-    def _on_file_changed(self, path: str):
-        """文件变化回调"""
-        try:
-            # 确保文件存在
-            if not os.path.exists(path):
-                return
+    def _watch_loop(self):
+        """文件监控循环"""
+        while self._is_running:
+            try:
+                if os.path.exists(self.config_path):
+                    current_mtime = os.path.getmtime(self.config_path)
+                    if current_mtime > self.last_modified_time:
+                        self.last_modified_time = current_mtime
+                        print(f"检测到配置文件变化: {self.config_path}")
+                        self._schedule_refresh()
+            except Exception as e:
+                print(f"监控文件时出错: {e}")
+            threading.Event().wait(0.5)  # 每0.5秒检查一次
 
-            # 获取新的修改时间
-            current_mtime = os.path.getmtime(path)
-
-            # 防止重复触发（快速多次修改）
-            if current_mtime <= self.last_modified_time:
-                return
-
-            # 更新最后修改时间
-            self.last_modified_time = current_mtime
-
-            print(f"检测到配置文件变化: {path}")
-
-            # 延迟触发刷新，避免频繁刷新
-            self.refresh_timer.start(self.refresh_delay)
-
-        except Exception as e:
-            print(f"处理文件变化时出错: {e}")
+    def _schedule_refresh(self):
+        """延迟触发刷新"""
+        if self._timer:
+            self._timer.cancel()
+        self._timer = threading.Timer(self.refresh_delay, self._perform_refresh)
+        self._timer.start()
 
     def _perform_refresh(self):
         """执行刷新操作"""
         try:
             print("触发配置刷新...")
-            self.config_changed.emit()
-            self.refresh_triggered.emit()
-
+            if self.on_config_changed:
+                self.on_config_changed()
+            if self.on_refresh_triggered:
+                self.on_refresh_triggered()
         except Exception as e:
             print(f"执行刷新时出错: {e}")
 
     def stop(self):
         """停止监控"""
         if self._is_running:
-            self.watcher.removePath(self.config_path)
-            self.refresh_timer.stop()
             self._is_running = False
+            if self._timer:
+                self._timer.cancel()
             print("配置文件监控已停止")
 
     def restart(self):
@@ -111,10 +95,9 @@ class ConfigRefreshManager(QObject):
         """强制刷新"""
         self._perform_refresh()
 
-    def set_refresh_delay(self, delay: int):
-        """设置刷新延迟（毫秒）"""
+    def set_refresh_delay(self, delay: float):
+        """设置刷新延迟（秒）"""
         self.refresh_delay = delay
-        self.refresh_timer.setInterval(delay)
 
     def get_config_path(self) -> str:
         """获取配置文件路径"""
@@ -139,14 +122,14 @@ class GlobalRefreshManager:
     def __init__(self):
         if not GlobalRefreshManager._initialized:
             self.config_manager: Optional[ConfigRefreshManager] = None
-            self.refresh_callbacks: list[Callable] = []
+            self.refresh_callbacks: List[Callable] = []
             GlobalRefreshManager._initialized = True
 
     def init_manager(self, config_path: Optional[str] = None):
         """初始化管理器"""
         if self.config_manager is None:
             self.config_manager = ConfigRefreshManager(config_path)
-            self.config_manager.config_changed.connect(self._on_config_changed)
+            self.config_manager.on_config_changed = self._on_config_changed
 
     def register_refresh_callback(self, callback: Callable):
         """注册刷新回调函数"""
@@ -160,7 +143,6 @@ class GlobalRefreshManager:
 
     def _on_config_changed(self):
         """配置变化回调"""
-        # 执行所有注册的回调函数
         for callback in self.refresh_callbacks:
             try:
                 callback()

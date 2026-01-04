@@ -2,6 +2,8 @@
 import flet as ft
 import json
 import threading
+import sys
+import os
 from pathlib import Path
 from ..common import THEMES, OFFICIAL_MCP_SERVERS, MCP_MARKETPLACES, save_mcp, show_snackbar
 from ..database import mcp_registry
@@ -319,6 +321,10 @@ def create_mcp_page(state):
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_import_title']),
             content=ft.Column([
+                ft.ListTile(leading=ft.Icon(ft.Icons.COMPUTER, color=ft.Colors.TEAL),
+                           title=ft.Text(L['mcp_import_installed']),
+                           subtitle=ft.Text(L['mcp_import_installed_desc']),
+                           on_click=lambda _: close_and_run(import_from_installed)),
                 ft.ListTile(leading=ft.Icon(ft.Icons.CONTENT_PASTE, color=ft.Colors.BLUE),
                            title=ft.Text(L['mcp_import_clipboard']),
                            subtitle=ft.Text(L['mcp_import_clipboard_desc']),
@@ -333,6 +339,130 @@ def create_mcp_page(state):
                            on_click=lambda _: close_and_run(import_from_text)),
             ], tight=True, spacing=0),
             actions=[ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg))],
+        )
+        state.page.open(dlg)
+
+    def scan_installed_mcp():
+        """扫描已安装的 MCP 配置"""
+        results = []
+        home = Path.home()
+
+        # MCP 配置文件位置
+        mcp_sources = [
+            ('claude', home / '.claude' / 'settings.json'),
+            ('claude', home / '.claude.json'),
+            ('codex', home / '.codex' / 'config.json'),
+            ('codex', home / '.codex.json'),
+            ('gemini', home / '.gemini' / 'settings.json'),
+        ]
+
+        # VSCode Claude Code 插件
+        if sys.platform == 'win32':
+            vscode_path = Path(os.environ.get('APPDATA', '')) / 'Code' / 'User' / 'globalStorage' / 'anthropic.claude-code' / 'settings.json'
+        elif sys.platform == 'darwin':
+            vscode_path = home / 'Library' / 'Application Support' / 'Code' / 'User' / 'globalStorage' / 'anthropic.claude-code' / 'settings.json'
+        else:
+            vscode_path = home / '.config' / 'Code' / 'User' / 'globalStorage' / 'anthropic.claude-code' / 'settings.json'
+        mcp_sources.append(('vscode', vscode_path))
+
+        for source, path in mcp_sources:
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding='utf-8'))
+                servers = data.get('mcpServers', {})
+                for name, cfg in servers.items():
+                    if not isinstance(cfg, dict):
+                        continue
+                    args = cfg.get('args', [])
+                    env = cfg.get('env', {})
+                    results.append({
+                        'name': name,
+                        'source': source,
+                        'command': cfg.get('command', 'npx'),
+                        'args': ' '.join(args) if isinstance(args, list) else str(args),
+                        'env': ' '.join(f"{k}={v}" for k, v in env.items()) if isinstance(env, dict) else '',
+                    })
+            except (json.JSONDecodeError, OSError):
+                continue
+        return results
+
+    def import_from_installed(e):
+        """从已安装的 CLI 工具导入 MCP"""
+        installed = scan_installed_mcp()
+        if not installed:
+            show_snackbar(state.page, L['mcp_no_installed'])
+            return
+
+        source_names = {
+            'claude': L['mcp_source_claude'],
+            'codex': L['mcp_source_codex'],
+            'gemini': L['mcp_source_gemini'],
+            'vscode': L['mcp_source_vscode'],
+        }
+
+        selected_items = set()
+        result_list = ft.ListView(expand=True, spacing=2)
+        selected_count = ft.Text(L['mcp_selected'].format(0), color=ft.Colors.GREY_600)
+
+        def build_list():
+            result_list.controls.clear()
+            for i, item in enumerate(installed):
+                is_selected = i in selected_items
+                source_label = source_names.get(item['source'], item['source'])
+                tile = ft.Container(
+                    content=ft.Row([
+                        ft.Checkbox(value=is_selected, on_change=lambda e, idx=i: toggle_item(idx, e.control.value)),
+                        ft.Column([
+                            ft.Row([
+                                ft.Text(item['name'], weight=ft.FontWeight.BOLD if is_selected else None),
+                                ft.Container(ft.Text(source_label, size=10, color=ft.Colors.WHITE),
+                                           bgcolor=ft.Colors.TEAL, padding=ft.padding.symmetric(2, 6), border_radius=8),
+                            ], spacing=5),
+                            ft.Text(f"{item['command']} {item['args']}"[:60], size=11, color=ft.Colors.GREY_600),
+                        ], spacing=2, expand=True),
+                    ], spacing=10),
+                    padding=8, bgcolor=ft.Colors.TEAL_50 if is_selected else None, border_radius=4,
+                )
+                result_list.controls.append(tile)
+            state.page.update()
+
+        def toggle_item(idx, checked):
+            if checked:
+                selected_items.add(idx)
+            else:
+                selected_items.discard(idx)
+            selected_count.value = L['mcp_selected'].format(len(selected_items))
+            build_list()
+
+        def add_selected(ev):
+            added = 0
+            existing_names = {m.get('name', '').lower() for m in state.mcp_list}
+            for idx in selected_items:
+                item = installed[idx]
+                if item['name'].lower() in existing_names:
+                    continue
+                state.mcp_list.append({
+                    'name': item['name'], 'category': '其他',
+                    'command': item['command'], 'args': item['args'],
+                    'env': item['env'], 'is_default': False,
+                })
+                added += 1
+            if added:
+                state.save_mcp()
+                refresh_mcp_tree()
+                state.page.close(dlg)
+                show_snackbar(state.page, L['mcp_added'].format(added))
+
+        build_list()
+        dlg = ft.AlertDialog(
+            title=ft.Text(L['mcp_found_installed'].format(len(installed))),
+            content=ft.Container(result_list, width=500, height=350),
+            actions=[
+                selected_count,
+                ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg)),
+                ft.ElevatedButton(L['mcp_add_selected'], on_click=add_selected),
+            ],
         )
         state.page.open(dlg)
 

@@ -1,46 +1,36 @@
-"""截图工具 - 微信风格：框选后显示工具条，直接在选区标注"""
+"""轻量级截图工具 - 基于 tkinter + mss + PIL"""
 
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QColorDialog, QSpinBox, QLineEdit
-)
-from PySide6.QtGui import (
-    QPixmap, QCursor, QPainter, QColor, QPen, QFont, QBrush
-)
-from PySide6.QtCore import Qt, QRect, Signal, QPoint
+import tkinter as tk
+from tkinter import colorchooser
+from PIL import Image, ImageTk, ImageDraw, ImageFont
+import mss
+import time
+import json
 from pathlib import Path
-from enum import Enum
 from dataclasses import dataclass
 from typing import List, Optional
-import time
+from enum import Enum
 import math
-import traceback
-import json
 
 # 配置文件路径
 CONFIG_PATH = Path(__file__).parent.parent.parent / "data" / "screenshot.json"
 
-def load_settings() -> dict:
-    """加载截图设置"""
+def load_config() -> dict:
     try:
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
+    except:
         pass
     return {"color": "#ff0000", "width": 3}
 
-def save_settings(color: str, width: int):
-    """保存截图设置"""
+def save_config(color: str, width: int):
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump({"color": color, "width": width}, f)
-    except Exception:
+    except:
         pass
-
-def debug(msg):
-    import sys
-    print(f"[DEBUG] {msg}", file=sys.stderr)
 
 
 class ToolType(Enum):
@@ -56,482 +46,541 @@ class ToolType(Enum):
 @dataclass
 class Annotation:
     tool: ToolType
-    color: QColor
+    color: str
     width: int
-    start: QPoint
-    end: QPoint
+    start: tuple  # (x, y)
+    end: tuple    # (x, y)
     text: str = ""
-    points: List[QPoint] = None
+    points: List[tuple] = None
 
     def __post_init__(self):
         if self.points is None:
             self.points = []
 
 
-class ScreenshotSelector(QWidget):
-    """截图选择器 - 微信风格"""
-
-    screenshot_taken = Signal(str)
-    screenshot_cancelled = Signal()
+class ScreenshotTool:
+    # 预设颜色
+    PRESET_COLORS = ["#ff0000", "#ffff00", "#0000ff"]  # 红、黄、蓝
 
     def __init__(self, save_dir: str = None):
-        super().__init__()
         self.save_dir = Path(save_dir) if save_dir else Path.cwd() / "screenshots"
-        self.screenshot = None
-        self.start_pos = None
-        self.end_pos = None
-        self.selecting = True  # 是否在框选阶段
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
+        self.root = None
+        self.canvas = None
+        self.screenshot_image = None
+        self.tk_image = None
+        self.result_path = None
+
+        # 选区
+        self.start_x = self.start_y = 0
+        self.end_x = self.end_y = 0
+        self.selecting = True
         self.selection_rect = None
 
-        # 标注相关 - 加载保存的设置
+        # 标注
         self.annotations: List[Annotation] = []
         self.undo_stack: List[Annotation] = []
+        self.selected_index = -1  # 选中的标注索引
+
+        # 加载保存的设置
+        config = load_config()
         self.current_tool = ToolType.NONE
-        settings = load_settings()
-        self.current_color = QColor(settings.get("color", "#ff0000"))
-        self.current_width = settings.get("width", 3)
+        self.current_color = config.get("color", "#ff0000")
+        self.current_width = config.get("width", 3)
         self.drawing = False
         self.draw_start = None
         self.current_points = []
 
-        # 工具栏按钮
-        self.toolbar_buttons = []
-        self.color_btn = None
-        self.width_spin = None
-        self.text_input = None
+        # UI 元素
+        self.toolbar_frame = None
+        self.tool_buttons = {}
+        self.text_entry = None
         self.text_pos = None
+        self.width_var = None
+        self.color_btn = None
 
-    def start_screenshot(self):
-        """开始截图"""
-        screen = QApplication.primaryScreen()
-        self.screenshot = screen.grabWindow(0)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setGeometry(0, 0, self.screenshot.width(), self.screenshot.height())
-        self.setCursor(Qt.CrossCursor)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+    def start(self) -> Optional[str]:
+        """启动截图，返回保存路径或 None"""
+        # 截取全屏
+        with mss.mss() as sct:
+            monitor = sct.monitors[0]
+            sct_img = sct.grab(monitor)
+            self.screenshot_image = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.drawPixmap(0, 0, self.screenshot)
+        # 创建全屏窗口
+        self.root = tk.Tk()
+        self.root.attributes("-fullscreen", True)
+        self.root.attributes("-topmost", True)
+        self.root.configure(cursor="cross")
 
-        # 绘制遮罩和选区
-        if self.start_pos and self.end_pos:
-            rect = QRect(self.start_pos, self.end_pos).normalized()
-            mask = QColor(0, 0, 0, 120)
+        # 创建画布
+        self.tk_image = ImageTk.PhotoImage(self.screenshot_image)
+        self.canvas = tk.Canvas(self.root, highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image, tags="bg")
 
-            # 四周遮罩
-            painter.fillRect(0, 0, self.width(), rect.top(), mask)
-            painter.fillRect(0, rect.bottom() + 1, self.width(), self.height() - rect.bottom() - 1, mask)
-            painter.fillRect(0, rect.top(), rect.left(), rect.height(), mask)
-            painter.fillRect(rect.right() + 1, rect.top(), self.width() - rect.right() - 1, rect.height(), mask)
+        # 绑定事件
+        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_move)
+        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
+        self.canvas.bind("<ButtonPress-3>", self.on_right_click)
+        self.root.bind("<Escape>", self.on_escape)
+        self.root.bind("<Return>", self.on_confirm)
+        self.root.bind("<Control-z>", self.on_undo)
+        self.root.bind("<Control-Shift-Z>", self.on_redo)
+        self.root.bind("<Control-y>", self.on_redo)
 
-            # 选区边框
-            pen = QPen(QColor(0, 174, 255), 2)
-            painter.setPen(pen)
-            painter.drawRect(rect)
+        self.root.mainloop()
+        return self.result_path
 
-            # 尺寸提示
-            painter.setPen(QColor(255, 255, 255))
-            painter.setFont(QFont("Arial", 10))
-            size_text = f"{rect.width()} x {rect.height()}"
-            painter.drawText(rect.left(), rect.top() - 5, size_text)
+    def _hit_test(self, x, y) -> int:
+        """检测点击位置是否在某个标注上，返回索引或-1"""
+        for i in range(len(self.annotations) - 1, -1, -1):
+            ann = self.annotations[i]
+            ax1, ay1 = min(ann.start[0], ann.end[0]), min(ann.start[1], ann.end[1])
+            ax2, ay2 = max(ann.start[0], ann.end[0]), max(ann.start[1], ann.end[1])
+            # 扩大点击区域
+            margin = max(ann.width * 2, 10)
+            if ann.tool == ToolType.PEN and ann.points:
+                for p in ann.points:
+                    if abs(p[0] - x) < margin and abs(p[1] - y) < margin:
+                        return i
+            elif ann.tool == ToolType.TEXT:
+                if ax1 - margin <= x <= ax2 + 100 and ay1 - margin <= y <= ay2 + 30:
+                    return i
+            else:
+                if ax1 - margin <= x <= ax2 + margin and ay1 - margin <= y <= ay2 + margin:
+                    return i
+        return -1
 
-            # 绘制标注
-            for ann in self.annotations:
-                self._draw_annotation(painter, ann)
+    def on_mouse_down(self, event):
+        # 如果有文字输入框，先保存文字
+        if self.text_entry and self.text_pos:
+            self._confirm_text(self.text_pos[0], self.text_pos[1])
 
-            # 绘制当前正在画的
+        if self.selecting:
+            self.start_x, self.start_y = event.x, event.y
+            self.end_x, self.end_y = event.x, event.y
+        elif self.current_tool == ToolType.NONE:
+            # 没选工具时，检测是否点击了已有标注
+            hit = self._hit_test(event.x, event.y)
+            if hit >= 0:
+                self.selected_index = hit
+                # 更新当前颜色和粗细为选中标注的值
+                ann = self.annotations[hit]
+                self.current_color = ann.color
+                self.current_width = ann.width
+                if self.color_btn:
+                    self.color_btn.configure(bg=self.current_color)
+                if self.width_var:
+                    self.width_var.set(self.current_width)
+                self._draw_all()
+            else:
+                self.selected_index = -1
+                self._draw_all()
+        elif self.current_tool != ToolType.NONE:
+            x1, y1, x2, y2 = self._get_selection_rect()
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.selected_index = -1
+                self.drawing = True
+                self.draw_start = (event.x, event.y)
+                self.current_points = [(event.x, event.y)]
+                self.undo_stack.clear()
+                if self.current_tool == ToolType.TEXT:
+                    self._show_text_input(event.x, event.y)
+
+    def on_mouse_move(self, event):
+        if self.selecting and self.start_x:
+            self.end_x, self.end_y = event.x, event.y
+            self._draw_selection()
+        elif self.drawing:
+            if self.current_tool == ToolType.PEN:
+                self.current_points.append((event.x, event.y))
+            self._draw_all()
+
+    def on_mouse_up(self, event):
+        if self.selecting:
+            self.end_x, self.end_y = event.x, event.y
+            x1, y1, x2, y2 = self._get_selection_rect()
+            if abs(x2 - x1) > 10 and abs(y2 - y1) > 10:
+                self.selecting = False
+                self.root.configure(cursor="arrow")
+                self._create_toolbar()
+                self._draw_all()
+        elif self.drawing and self.current_tool != ToolType.TEXT:
+            self.drawing = False
+            ann = Annotation(
+                tool=self.current_tool,
+                color=self.current_color,
+                width=self.current_width,
+                start=self.draw_start,
+                end=(event.x, event.y),
+                points=list(self.current_points)
+            )
+            self.annotations.append(ann)
+            # 画笔工具不自动取消，其他工具取消选中
+            if self.current_tool != ToolType.PEN:
+                self._select_tool(ToolType.NONE)
+            else:
+                self._draw_all()
+
+    def on_right_click(self, event):
+        """右键删除：正在绘制取消 -> 选中的删除 -> 最后一个删除 -> 取消截图"""
+        if self.drawing:
+            self.drawing = False
+            self.draw_start = None
+            self.current_points = []
+            self._draw_all()
+        elif self.selected_index >= 0:
+            # 删除选中的标注
+            self.undo_stack.append(self.annotations.pop(self.selected_index))
+            self.selected_index = -1
+            self._draw_all()
+        elif self.annotations:
+            # 删除最后一个标注
+            self.undo_stack.append(self.annotations.pop())
+            self._draw_all()
+        else:
+            # 没有标注，取消截图
+            self.root.destroy()
+
+    def on_escape(self, event):
+        if self.selecting:
+            self.root.destroy()
+        elif self.drawing:
+            self.drawing = False
+            self.draw_start = None
+            self.current_points = []
+            self._draw_all()
+        elif self.selected_index >= 0:
+            self.selected_index = -1
+            self._draw_all()
+        elif self.annotations:
+            self.annotations.clear()
+            self.undo_stack.clear()
+            self._draw_all()
+        else:
+            self.selecting = True
+            self.start_x = self.start_y = 0
+            self.end_x = self.end_y = 0
+            self.current_tool = ToolType.NONE
+            self.root.configure(cursor="cross")
+            if self.toolbar_frame:
+                self.toolbar_frame.destroy()
+                self.toolbar_frame = None
+            self._draw_all()
+
+    def on_confirm(self, event=None):
+        if not self.selecting:
+            self._save_screenshot()
+            self.root.destroy()
+
+    def on_undo(self, event=None):
+        if self.annotations:
+            self.undo_stack.append(self.annotations.pop())
+            self.selected_index = -1
+            self._draw_all()
+
+    def on_redo(self, event=None):
+        if self.undo_stack:
+            self.annotations.append(self.undo_stack.pop())
+            self._draw_all()
+
+    def _get_selection_rect(self):
+        x1, x2 = min(self.start_x, self.end_x), max(self.start_x, self.end_x)
+        y1, y2 = min(self.start_y, self.end_y), max(self.start_y, self.end_y)
+        return x1, y1, x2, y2
+
+    def _draw_selection(self):
+        self.canvas.delete("overlay")
+        x1, y1, x2, y2 = self._get_selection_rect()
+
+        w, h = self.screenshot_image.size
+        self.canvas.create_rectangle(0, 0, w, y1, fill="black", stipple="gray50", tags="overlay")
+        self.canvas.create_rectangle(0, y2, w, h, fill="black", stipple="gray50", tags="overlay")
+        self.canvas.create_rectangle(0, y1, x1, y2, fill="black", stipple="gray50", tags="overlay")
+        self.canvas.create_rectangle(x2, y1, w, y2, fill="black", stipple="gray50", tags="overlay")
+
+        self.canvas.create_rectangle(x1, y1, x2, y2, outline="#00aeff", width=2, tags="overlay")
+        self.canvas.create_text(x1, y1 - 5, text=f"{x2-x1} x {y2-y1}",
+                               fill="white", anchor=tk.SW, tags="overlay")
+
+    def _draw_all(self):
+        self.canvas.delete("overlay")
+        self.canvas.delete("annotation")
+
+        if not self.selecting:
+            self._draw_selection()
+
+            for i, ann in enumerate(self.annotations):
+                selected = (i == self.selected_index)
+                self._draw_annotation(ann, selected)
+
             if self.drawing and self.draw_start:
                 current_ann = Annotation(
                     tool=self.current_tool,
                     color=self.current_color,
                     width=self.current_width,
                     start=self.draw_start,
-                    end=self.mapFromGlobal(QCursor.pos()),
+                    end=self.canvas.winfo_pointerxy(),
                     points=list(self.current_points)
                 )
-                self._draw_annotation(painter, current_ann)
+                rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+                current_ann.end = (current_ann.end[0] - rx, current_ann.end[1] - ry)
+                self._draw_annotation(current_ann, False)
 
-    def _draw_annotation(self, painter: QPainter, ann: Annotation):
-        pen = QPen(ann.color, ann.width)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+    def _draw_annotation(self, ann: Annotation, selected: bool = False):
+        x1, y1 = ann.start
+        x2, y2 = ann.end
 
         if ann.tool == ToolType.RECT:
-            painter.drawRect(QRect(ann.start, ann.end))
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline=ann.color,
+                                        width=ann.width, tags="annotation")
         elif ann.tool == ToolType.ELLIPSE:
-            painter.drawEllipse(QRect(ann.start, ann.end))
+            self.canvas.create_oval(x1, y1, x2, y2, outline=ann.color,
+                                   width=ann.width, tags="annotation")
         elif ann.tool == ToolType.LINE:
-            painter.drawLine(ann.start, ann.end)
+            self.canvas.create_line(x1, y1, x2, y2, fill=ann.color,
+                                   width=ann.width, tags="annotation")
         elif ann.tool == ToolType.ARROW:
-            self._draw_arrow(painter, ann.start, ann.end, ann.color, ann.width)
+            self._draw_arrow(x1, y1, x2, y2, ann.color, ann.width)
         elif ann.tool == ToolType.PEN and ann.points:
-            for i in range(1, len(ann.points)):
-                painter.drawLine(ann.points[i-1], ann.points[i])
+            if len(ann.points) > 1:
+                self.canvas.create_line(ann.points, fill=ann.color,
+                                       width=ann.width, smooth=True, tags="annotation")
         elif ann.tool == ToolType.TEXT and ann.text:
-            font = QFont("Microsoft YaHei", ann.width * 4)
-            painter.setFont(font)
-            painter.drawText(ann.start, ann.text)
+            font_size = ann.width * 6
+            self.canvas.create_text(x1, y1, text=ann.text, fill=ann.color,
+                                   anchor=tk.NW, font=("Microsoft YaHei", font_size),
+                                   tags="annotation")
 
-    def _draw_arrow(self, painter: QPainter, start: QPoint, end: QPoint, color: QColor, width: int):
-        painter.drawLine(start, end)
-        angle = math.atan2(end.y() - start.y(), end.x() - start.x())
-        arrow_size = width * 4
-        p1 = QPoint(int(end.x() - arrow_size * math.cos(angle - math.pi/6)),
-                    int(end.y() - arrow_size * math.sin(angle - math.pi/6)))
-        p2 = QPoint(int(end.x() - arrow_size * math.cos(angle + math.pi/6)),
-                    int(end.y() - arrow_size * math.sin(angle + math.pi/6)))
-        painter.setBrush(QBrush(color))
-        painter.drawPolygon([end, p1, p2])
+        # 选中状态显示边框
+        if selected:
+            bx1, by1 = min(x1, x2), min(y1, y2)
+            bx2, by2 = max(x1, x2), max(y1, y2)
+            if ann.tool == ToolType.TEXT:
+                bx2 += 100
+                by2 += 30
+            self.canvas.create_rectangle(bx1 - 5, by1 - 5, bx2 + 5, by2 + 5,
+                                        outline="#00aeff", width=2, dash=(4, 4), tags="annotation")
 
-    def mousePressEvent(self, event):
-        debug(f"mousePressEvent: button={event.button()}, selecting={self.selecting}, tool={self.current_tool}")
-        if event.button() == Qt.LeftButton:
-            if self.selecting:
-                self.start_pos = event.pos()
-                self.end_pos = event.pos()
-            elif self.current_tool != ToolType.NONE:
-                rect = QRect(self.start_pos, self.end_pos).normalized()
-                if rect.contains(event.pos()):
-                    self.drawing = True
-                    self.draw_start = event.pos()
-                    self.current_points = [event.pos()]
-                    self.undo_stack.clear()
-                    if self.current_tool == ToolType.TEXT:
-                        self._show_text_input(event.pos())
-
-    def mouseMoveEvent(self, event):
-        if self.selecting and self.start_pos:
-            self.end_pos = event.pos()
-            self.update()
-        elif self.drawing:
-            if self.current_tool == ToolType.PEN:
-                self.current_points.append(event.pos())
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        debug(f"mouseReleaseEvent: button={event.button()}, selecting={self.selecting}, annotations={len(self.annotations)}")
-        try:
-            if event.button() == Qt.LeftButton:
-                if self.selecting and self.start_pos and self.end_pos:
-                    rect = QRect(self.start_pos, self.end_pos).normalized()
-                    if rect.width() > 10 and rect.height() > 10:
-                        self.selecting = False
-                        self.selection_rect = rect
-                        self.setCursor(Qt.ArrowCursor)
-                        self._create_toolbar()
-                elif self.drawing and self.current_tool != ToolType.TEXT:
-                    self.drawing = False
-                    ann = Annotation(
-                        tool=self.current_tool,
-                        color=self.current_color,
-                        width=self.current_width,
-                        start=self.draw_start,
-                        end=event.pos(),
-                        points=list(self.current_points)
-                    )
-                    self.annotations.append(ann)
-                    self.update()
-            elif event.button() == Qt.RightButton:
-                debug(f"RightButton: selecting={self.selecting}, annotations={len(self.annotations)}")
-                if self.selecting:
-                    debug("RightButton: 框选阶段退出")
-                    self.screenshot_cancelled.emit()
-                    self.close()
-                elif self.annotations:
-                    debug("RightButton: 清除标注")
-                    self.annotations.clear()
-                    self.undo_stack.clear()
-                    self.update()
-                else:
-                    debug("RightButton: 返回框选模式")
-                    self._clear_toolbar()
-                    self.selecting = True
-                    self.start_pos = None
-                    self.end_pos = None
-                    self.current_tool = ToolType.NONE
-                    self.setCursor(Qt.CrossCursor)
-                    self.update()
-        except Exception as e:
-            debug(f"mouseReleaseEvent ERROR: {e}")
-            traceback.print_exc()
-
-    def keyPressEvent(self, event):
-        debug(f"keyPressEvent: key={event.key()}, selecting={self.selecting}, annotations={len(self.annotations)}")
-        try:
-            if event.key() == Qt.Key_Escape:
-                if self.selecting:
-                    debug("ESC: 框选阶段退出")
-                    self.screenshot_cancelled.emit()
-                    self.close()
-                elif self.annotations:
-                    debug("ESC: 清除标注")
-                    self.annotations.clear()
-                    self.undo_stack.clear()
-                    self.update()
-                else:
-                    debug("ESC: 返回框选模式")
-                    self._clear_toolbar()
-                    self.selecting = True
-                    self.start_pos = None
-                    self.end_pos = None
-                    self.current_tool = ToolType.NONE
-                    self.setCursor(Qt.CrossCursor)
-                    self.update()
-            elif event.key() == Qt.Key_Return:
-                if not self.selecting and self.start_pos and self.end_pos:
-                    self._confirm()
-            elif event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier:
-                if event.modifiers() & Qt.ShiftModifier:
-                    self._redo()
-                else:
-                    self._undo()
-        except Exception as e:
-            debug(f"keyPressEvent ERROR: {e}")
-            traceback.print_exc()
+    def _draw_arrow(self, x1, y1, x2, y2, color, width):
+        angle = math.atan2(y2 - y1, x2 - x1)
+        arrow_size = max(width * 5, 15)
+        # 线条终点稍微进入三角形内部
+        line_end_x = x2 - arrow_size * 0.8 * math.cos(angle)
+        line_end_y = y2 - arrow_size * 0.8 * math.sin(angle)
+        self.canvas.create_line(x1, y1, line_end_x, line_end_y, fill=color, width=width, tags="annotation")
+        # 箭头三角形
+        p1 = (x2 - arrow_size * math.cos(angle - math.pi/6),
+              y2 - arrow_size * math.sin(angle - math.pi/6))
+        p2 = (x2 - arrow_size * math.cos(angle + math.pi/6),
+              y2 - arrow_size * math.sin(angle + math.pi/6))
+        self.canvas.create_polygon([x2, y2, p1[0], p1[1], p2[0], p2[1]],
+                                  fill=color, outline=color, tags="annotation")
 
     def _create_toolbar(self):
-        """创建工具条"""
-        debug("_create_toolbar: 开始创建工具栏")
-        try:
-            rect = QRect(self.start_pos, self.end_pos).normalized()
-            toolbar_y = rect.bottom() + 8
-            btn_size = 40
-            if toolbar_y + btn_size + 10 > self.height():
-                toolbar_y = rect.top() - btn_size - 8
+        x1, y1, x2, y2 = self._get_selection_rect()
+        screen_h = self.root.winfo_screenheight()
 
-            btn_style = "QPushButton { background: rgba(50,50,50,0.9); color: white; border: none; border-radius: 6px; font-size: 18px; } QPushButton:hover { background: rgba(80,80,80,0.95); }"
-            btn_style_selected = "QPushButton { background: #07c160; color: white; border: none; border-radius: 6px; font-size: 18px; }"
+        if screen_h - y2 < 60:
+            toolbar_y = y2 - 50
+        else:
+            toolbar_y = y2 + 8
 
-            x = rect.left()
-            # 微信风格图标和提示
-            tools = [
-                ("□", ToolType.RECT, "矩形框"),
-                ("○", ToolType.ELLIPSE, "椭圆"),
-                ("➔", ToolType.ARROW, "箭头"),
-                ("╱", ToolType.LINE, "直线"),
-                ("A", ToolType.TEXT, "文字"),
-                ("✐", ToolType.PEN, "画笔"),
-            ]
+        self.toolbar_frame = tk.Frame(self.root, bg="#333333")
+        self.toolbar_frame.place(x=x1, y=toolbar_y)
 
-            for icon, tool_type, tip in tools:
-                btn = QPushButton(icon, self)
-                btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-                btn.setStyleSheet(btn_style)
-                btn.setToolTip(tip)
-                btn.clicked.connect(lambda _, t=tool_type: self._select_tool(t))
-                btn.show()
-                self.toolbar_buttons.append((btn, tool_type))
-                x += btn_size + 4
+        tools = [
+            ("\u2b1c", ToolType.RECT, "矩形"),
+            ("\u25ef", ToolType.ELLIPSE, "椭圆"),
+            ("\u279c", ToolType.ARROW, "箭头"),
+            ("\u2571", ToolType.LINE, "直线"),
+            ("A", ToolType.TEXT, "文字"),
+            ("\u270e", ToolType.PEN, "画笔"),
+        ]
 
-            x += 8  # 分隔
+        for icon, tool_type, tip in tools:
+            btn = tk.Button(self.toolbar_frame, text=icon, width=2, height=1,
+                           bg="#333333", fg="white", relief=tk.FLAT,
+                           font=("Segoe UI Symbol", 16),
+                           command=lambda t=tool_type: self._select_tool(t))
+            btn.pack(side=tk.LEFT, padx=2, pady=4)
+            self.tool_buttons[tool_type] = btn
 
-            # 颜色按钮
-            self.color_btn = QPushButton(self)
-            self.color_btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-            self.color_btn.setStyleSheet(f"background-color: {self.current_color.name()}; border-radius: 6px; border: 2px solid white;")
-            self.color_btn.setToolTip("选择颜色")
-            self.color_btn.clicked.connect(self._pick_color)
-            self.color_btn.show()
-            x += btn_size + 4
+        # 分隔
+        tk.Frame(self.toolbar_frame, width=2, bg="#555555").pack(side=tk.LEFT, padx=4, pady=4, fill=tk.Y)
 
-            # 线宽
-            self.width_spin = QSpinBox(self)
-            self.width_spin.setRange(1, 10)
-            self.width_spin.setValue(self.current_width)
-            self.width_spin.setGeometry(x, toolbar_y, 50, btn_size)
-            self.width_spin.setStyleSheet("color: white; background: rgba(50,50,50,0.9); border-radius: 6px; font-size: 14px;")
-            self.width_spin.setToolTip("线条粗细")
-            self.width_spin.valueChanged.connect(self._on_width_change)
-            self.width_spin.show()
-            x += 58
+        # 预设颜色
+        for color in self.PRESET_COLORS:
+            btn = tk.Button(self.toolbar_frame, text=" ", width=2, height=1,
+                           bg=color, relief=tk.FLAT, font=("Arial", 16),
+                           command=lambda c=color: self._set_color(c))
+            btn.pack(side=tk.LEFT, padx=1, pady=4)
 
-            # 撤销
-            undo_btn = QPushButton("↩", self)
-            undo_btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-            undo_btn.setStyleSheet(btn_style)
-            undo_btn.setToolTip("撤销 (Ctrl+Z)")
-            undo_btn.clicked.connect(self._undo)
-            undo_btn.show()
-            self.toolbar_buttons.append((undo_btn, None))
-            x += btn_size + 4
+        # 自定义颜色
+        self.color_btn = tk.Button(self.toolbar_frame, text="...", width=2, height=1,
+                                   bg=self.current_color, fg="white", relief=tk.FLAT,
+                                   font=("Arial", 16), command=self._pick_color)
+        self.color_btn.pack(side=tk.LEFT, padx=2, pady=4)
 
-            # 重做
-            redo_btn = QPushButton("↪", self)
-            redo_btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-            redo_btn.setStyleSheet(btn_style)
-            redo_btn.setToolTip("重做 (Ctrl+Shift+Z)")
-            redo_btn.clicked.connect(self._redo)
-            redo_btn.show()
-            self.toolbar_buttons.append((redo_btn, None))
-            x += btn_size + 12
+        # 分隔
+        tk.Frame(self.toolbar_frame, width=2, bg="#555555").pack(side=tk.LEFT, padx=4, pady=4, fill=tk.Y)
 
-            # 取消
-            cancel_btn = QPushButton("✕", self)
-            cancel_btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-            cancel_btn.setStyleSheet("QPushButton { background: rgba(220,53,69,0.9); color: white; border: none; border-radius: 6px; font-size: 18px; } QPushButton:hover { background: rgba(200,35,51,0.95); }")
-            cancel_btn.setToolTip("取消 (Esc)")
-            cancel_btn.clicked.connect(self._cancel)
-            cancel_btn.show()
-            self.toolbar_buttons.append((cancel_btn, None))
-            x += btn_size + 4
+        # 粗细调节
+        self.width_var = tk.IntVar(value=self.current_width)
+        width_spin = tk.Spinbox(self.toolbar_frame, from_=1, to=30, width=3,
+                               textvariable=self.width_var,
+                               command=self._on_width_change,
+                               font=("Arial", 10))
+        width_spin.pack(side=tk.LEFT, padx=2, pady=4)
+        width_spin.bind("<Return>", lambda e: self._on_width_change())
+        width_spin.bind("<FocusOut>", lambda e: self._on_width_change())
+        self.width_var.trace_add("write", lambda *args: self._on_width_change())
 
-            # 确认
-            confirm_btn = QPushButton("✓", self)
-            confirm_btn.setGeometry(x, toolbar_y, btn_size, btn_size)
-            confirm_btn.setStyleSheet("QPushButton { background: rgba(7,193,96,0.9); color: white; border: none; border-radius: 6px; font-size: 18px; } QPushButton:hover { background: rgba(6,170,84,0.95); }")
-            confirm_btn.setToolTip("完成 (Enter)")
-            confirm_btn.clicked.connect(self._confirm)
-            confirm_btn.show()
-            self.toolbar_buttons.append((confirm_btn, None))
-            debug("_create_toolbar: 工具栏创建完成")
-        except Exception as e:
-            debug(f"_create_toolbar ERROR: {e}")
-            traceback.print_exc()
+        # 分隔
+        tk.Frame(self.toolbar_frame, width=2, bg="#555555").pack(side=tk.LEFT, padx=4, pady=4, fill=tk.Y)
 
-    def _clear_toolbar(self):
-        debug(f"_clear_toolbar: 开始清理, buttons={len(self.toolbar_buttons)}")
-        try:
-            for btn, _ in self.toolbar_buttons:
-                btn.deleteLater()
-            self.toolbar_buttons.clear()
-            if self.color_btn:
-                self.color_btn.deleteLater()
-                self.color_btn = None
-            if self.width_spin:
-                self.width_spin.deleteLater()
-                self.width_spin = None
-            if self.text_input:
-                self.text_input.deleteLater()
-                self.text_input = None
-            debug("_clear_toolbar: 清理完成")
-        except Exception as e:
-            debug(f"_clear_toolbar ERROR: {e}")
-            traceback.print_exc()
+        # 撤销
+        tk.Button(self.toolbar_frame, text="\u27f2", width=2, height=1,
+                 bg="#333333", fg="white", relief=tk.FLAT, font=("Segoe UI Symbol", 16),
+                 command=self.on_undo).pack(side=tk.LEFT, padx=2, pady=4)
+
+        # 重做
+        tk.Button(self.toolbar_frame, text="\u27f3", width=2, height=1,
+                 bg="#333333", fg="white", relief=tk.FLAT, font=("Segoe UI Symbol", 16),
+                 command=self.on_redo).pack(side=tk.LEFT, padx=2, pady=4)
+
+        # 分隔
+        tk.Frame(self.toolbar_frame, width=2, bg="#555555").pack(side=tk.LEFT, padx=4, pady=4, fill=tk.Y)
+
+        # 取消
+        tk.Button(self.toolbar_frame, text="\u2715", width=2, height=1,
+                 bg="#dc3545", fg="white", relief=tk.FLAT, font=("Segoe UI Symbol", 16),
+                 command=lambda: self.on_escape(None)).pack(side=tk.LEFT, padx=2, pady=4)
+
+        # 确认
+        tk.Button(self.toolbar_frame, text="\u2713", width=2, height=1,
+                 bg="#07c160", fg="white", relief=tk.FLAT, font=("Segoe UI Symbol", 16),
+                 command=self.on_confirm).pack(side=tk.LEFT, padx=2, pady=4)
 
     def _select_tool(self, tool: ToolType):
         self.current_tool = tool
-        btn_style = "QPushButton { background: #333; color: white; border: none; border-radius: 4px; font-size: 14px; } QPushButton:hover { background: #555; }"
-        btn_style_selected = "QPushButton { background: #0078d4; color: white; border: none; border-radius: 4px; font-size: 14px; }"
-        for btn, t in self.toolbar_buttons:
-            if t is not None:
-                btn.setStyleSheet(btn_style_selected if t == tool else btn_style)
-        if self.text_input:
-            self.text_input.hide()
+        self.selected_index = -1
+        for t, btn in self.tool_buttons.items():
+            btn.configure(bg="#0078d4" if t == tool else "#333333")
+        if self.text_entry:
+            self.text_entry.destroy()
+            self.text_entry = None
+        self._draw_all()
+
+    def _set_color(self, color: str):
+        """设置颜色，更新选中或最后一个标注"""
+        self.current_color = color
+        if self.color_btn:
+            self.color_btn.configure(bg=color)
+        if self.selected_index >= 0:
+            self.annotations[self.selected_index].color = color
+        elif self.annotations:
+            self.annotations[-1].color = color
+        self._draw_all()
+        save_config(self.current_color, self.current_width)
 
     def _pick_color(self):
-        color = QColorDialog.getColor(self.current_color, self)
-        if color.isValid():
-            self.current_color = color
-            self.color_btn.setStyleSheet(f"background-color: {color.name()}; border-radius: 4px;")
-            save_settings(color.name(), self.current_width)
+        color = colorchooser.askcolor(color=self.current_color)[1]
+        if color:
+            self._set_color(color)
 
-    def _on_width_change(self, v):
-        self.current_width = v
-        save_settings(self.current_color.name(), v)
+    def _on_width_change(self):
+        try:
+            self.current_width = self.width_var.get()
+            if self.selected_index >= 0:
+                self.annotations[self.selected_index].width = self.current_width
+            elif self.annotations:
+                self.annotations[-1].width = self.current_width
+            self._draw_all()
+            save_config(self.current_color, self.current_width)
+        except:
+            pass
 
-    def _undo(self):
-        if self.annotations:
-            self.undo_stack.append(self.annotations.pop())
-            self.update()
+    def _show_text_input(self, x, y):
+        if self.text_entry:
+            self.text_entry.destroy()
+        self.text_entry = tk.Entry(self.root, font=("Microsoft YaHei", 14),
+                                   bg="#222222", fg=self.current_color,
+                                   insertbackground=self.current_color,
+                                   relief=tk.FLAT, highlightthickness=1,
+                                   highlightcolor=self.current_color)
+        self.text_entry.place(x=x, y=y)
+        self.text_entry.focus_set()
+        self.text_entry.bind("<Return>", lambda e: self._confirm_text(x, y))
+        self.text_pos = (x, y)
 
-    def _redo(self):
-        if self.undo_stack:
-            self.annotations.append(self.undo_stack.pop())
-            self.update()
-
-    def _show_text_input(self, pos: QPoint):
-        if not self.text_input:
-            self.text_input = QLineEdit(self)
-            self.text_input.setStyleSheet("background: white; border: 2px solid #0078d4; border-radius: 4px; padding: 4px;")
-            self.text_input.returnPressed.connect(self._confirm_text)
-        self.text_input.move(pos)
-        self.text_input.setFixedWidth(200)
-        self.text_input.clear()
-        self.text_input.show()
-        self.text_input.setFocus()
-        self.text_pos = pos
-
-    def _confirm_text(self):
-        if self.text_input and self.text_pos:
-            text = self.text_input.text().strip()
+    def _confirm_text(self, x, y):
+        if self.text_entry:
+            text = self.text_entry.get().strip()
             if text:
                 ann = Annotation(
                     tool=ToolType.TEXT,
                     color=self.current_color,
                     width=self.current_width,
-                    start=self.text_pos,
-                    end=self.text_pos,
+                    start=(x, y),
+                    end=(x, y),
                     text=text
                 )
                 self.annotations.append(ann)
-            self.text_input.hide()
-            self.text_pos = None
+            self.text_entry.destroy()
+            self.text_entry = None
             self.drawing = False
-            self.update()
+            self._select_tool(ToolType.NONE)  # 取消工具选中
 
-    def _cancel(self):
-        debug("_cancel: 取消截图")
-        self.screenshot_cancelled.emit()
-        self.close()
+    def _save_screenshot(self):
+        x1, y1, x2, y2 = self._get_selection_rect()
+        cropped = self.screenshot_image.crop((x1, y1, x2, y2))
+        draw = ImageDraw.Draw(cropped)
 
-    def _confirm(self):
-        """确认截图"""
-        debug("_confirm: 确认截图")
-        try:
-            rect = QRect(self.start_pos, self.end_pos).normalized()
+        for ann in self.annotations:
+            ax1, ay1 = ann.start[0] - x1, ann.start[1] - y1
+            ax2, ay2 = ann.end[0] - x1, ann.end[1] - y1
 
-            # 隐藏工具栏后截取
-            self._clear_toolbar()
-            self.update()
-            QApplication.processEvents()
+            if ann.tool == ToolType.RECT:
+                draw.rectangle([ax1, ay1, ax2, ay2], outline=ann.color, width=ann.width)
+            elif ann.tool == ToolType.ELLIPSE:
+                draw.ellipse([ax1, ay1, ax2, ay2], outline=ann.color, width=ann.width)
+            elif ann.tool == ToolType.LINE:
+                draw.line([ax1, ay1, ax2, ay2], fill=ann.color, width=ann.width)
+            elif ann.tool == ToolType.ARROW:
+                angle = math.atan2(ay2 - ay1, ax2 - ax1)
+                arrow_size = max(ann.width * 5, 15)
+                line_end_x = ax2 - arrow_size * 0.8 * math.cos(angle)
+                line_end_y = ay2 - arrow_size * 0.8 * math.sin(angle)
+                draw.line([ax1, ay1, line_end_x, line_end_y], fill=ann.color, width=ann.width)
+                p1 = (ax2 - arrow_size * math.cos(angle - math.pi/6),
+                      ay2 - arrow_size * math.sin(angle - math.pi/6))
+                p2 = (ax2 - arrow_size * math.cos(angle + math.pi/6),
+                      ay2 - arrow_size * math.sin(angle + math.pi/6))
+                draw.polygon([(ax2, ay2), p1, p2], fill=ann.color)
+            elif ann.tool == ToolType.PEN and ann.points:
+                points = [(p[0] - x1, p[1] - y1) for p in ann.points]
+                if len(points) > 1:
+                    draw.line(points, fill=ann.color, width=ann.width)
+            elif ann.tool == ToolType.TEXT and ann.text:
+                try:
+                    font = ImageFont.truetype("msyh.ttc", ann.width * 6)
+                except:
+                    font = ImageFont.load_default()
+                draw.text((ax1, ay1), ann.text, fill=ann.color, font=font)
 
-            # 创建最终图片
-            result = self.screenshot.copy(rect)
-            painter = QPainter(result)
-            painter.setRenderHint(QPainter.Antialiasing)
-
-            # 绘制标注（坐标转换到裁剪区域）
-            for ann in self.annotations:
-                offset_ann = Annotation(
-                    tool=ann.tool,
-                    color=ann.color,
-                    width=ann.width,
-                    start=ann.start - rect.topLeft(),
-                    end=ann.end - rect.topLeft(),
-                    text=ann.text,
-                    points=[p - rect.topLeft() for p in ann.points]
-                )
-                self._draw_annotation(painter, offset_ann)
-            painter.end()
-
-            # 保存
-            self.save_dir.mkdir(parents=True, exist_ok=True)
-            file_path = self.save_dir / f"screenshot_{int(time.time())}.png"
-            result.save(str(file_path))
-            debug(f"_confirm: 保存到 {file_path}")
-            self.screenshot_taken.emit(str(file_path))
-            self.close()
-        except Exception as e:
-            debug(f"_confirm ERROR: {e}")
-            traceback.print_exc()
+        file_path = self.save_dir / f"screenshot_{int(time.time())}.png"
+        cropped.save(str(file_path))
+        self.result_path = str(file_path)
 
 
 def take_screenshot(save_dir: str = None) -> Optional[str]:
-    """启动截图工具（阻塞式）"""
-    app = QApplication.instance()
-    if not app:
-        app = QApplication([])
-
-    result = [None]
-    selector = ScreenshotSelector(save_dir)
-    selector.screenshot_taken.connect(lambda p: result.__setitem__(0, p))
-    selector.start_screenshot()
-    app.exec()
-    return result[0]
+    """截图入口函数"""
+    tool = ScreenshotTool(save_dir)
+    return tool.start()
 
 
 if __name__ == "__main__":
@@ -539,4 +588,4 @@ if __name__ == "__main__":
     save_dir = sys.argv[1] if len(sys.argv) > 1 else None
     path = take_screenshot(save_dir)
     if path:
-        print(path)  # 只输出路径，供父进程读取
+        print(path)

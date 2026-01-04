@@ -99,7 +99,6 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
                 old_title = page.title
                 lang = load_settings().get('lang', 'zh')
                 page.title = LANG[lang].get('screenshot_in_progress', '截图中...')
-                page.window.to_front()
                 page.update()
             except Exception:
                 pass
@@ -112,7 +111,6 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
             if page and old_title:
                 try:
                     page.title = old_title
-                    page.window.to_front()
                     page.update()
                 except Exception:
                     pass
@@ -232,7 +230,6 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                 try:
                     if _old_title:
                         page.title = _old_title
-                    page.window.minimized = False
                     page.update()
                 except Exception:
                     pass

@@ -545,6 +545,69 @@ class CodexHistoryManager:
         self.codex_dir = codex_dir
         self.trash_manager = TrashManager(codex_dir)
 
+    def list_projects(self, with_cwd: bool = False, limit: int = 0) -> list:
+        """列出日期分组，按最后修改时间倒序"""
+        sessions_dir = self.codex_dir / "sessions"
+        if not sessions_dir.exists():
+            return []
+        # 收集所有日期分组
+        date_groups = {}
+        for session_file in sessions_dir.rglob("*.jsonl"):
+            parts = session_file.relative_to(sessions_dir).parts
+            if len(parts) >= 3:
+                date_group = f"{parts[0]}-{parts[1]}-{parts[2]}"
+            else:
+                date_group = "未知日期"
+            mtime = session_file.stat().st_mtime
+            if date_group not in date_groups or mtime > date_groups[date_group]:
+                date_groups[date_group] = mtime
+        # 按修改时间倒序
+        sorted_groups = sorted(date_groups.keys(), key=lambda x: date_groups[x], reverse=True)
+        if limit > 0:
+            sorted_groups = sorted_groups[:limit]
+        if not with_cwd:
+            return sorted_groups
+        # 返回 [(date_group, cwd), ...]
+        result = []
+        for grp in sorted_groups:
+            cwd = ''
+            for f in sessions_dir.rglob("*.jsonl"):
+                parts = f.relative_to(sessions_dir).parts
+                if len(parts) >= 3 and f"{parts[0]}-{parts[1]}-{parts[2]}" == grp:
+                    try:
+                        with open(f, 'r', encoding='utf-8') as fp:
+                            for line in fp:
+                                if '"cwd"' in line:
+                                    data = json.loads(line)
+                                    cwd = data.get('payload', {}).get('cwd', '') or data.get('cwd', '')
+                                    break
+                        if cwd:
+                            break
+                    except:
+                        pass
+            result.append((grp, cwd))
+        return result
+
+    def load_project(self, date_group: str) -> dict:
+        """加载指定日期分组的会话"""
+        sessions_dir = self.codex_dir / "sessions"
+        result = {}
+        if not sessions_dir.exists():
+            return result
+        for session_file in sessions_dir.rglob("*.jsonl"):
+            parts = session_file.relative_to(sessions_dir).parts
+            if len(parts) >= 3:
+                grp = f"{parts[0]}-{parts[1]}-{parts[2]}"
+            else:
+                grp = "未知日期"
+            if grp != date_group:
+                continue
+            session_id = session_file.stem.replace("rollout-", "")
+            info = self._parse_session(session_file)
+            if info:
+                result[session_id] = info
+        return result
+
     def load_sessions(self, callback=None) -> dict:
         sessions_dir = self.codex_dir / "sessions"
         result = {}

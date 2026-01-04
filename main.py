@@ -217,7 +217,7 @@ def main(page: ft.Page):
     check_for_updates()
 
     # 注册截图快捷键 Ctrl+Alt+A
-    setup_screenshot_hotkey()
+    setup_screenshot_hotkey(page=page)
     setup_copypath_hotkey(page=page)
 
     # 注册 Win+V 剪贴板粘贴支持

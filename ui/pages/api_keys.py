@@ -909,11 +909,18 @@ def create_api_page(state):
         page.open(dlg)
 
     # 截图功能
+    screenshot_btn = ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, width=100, tooltip="截图保留一周")
+
     def take_screenshot(e):
         """启动截图工具 - 使用子进程避免线程问题"""
         import subprocess
         import threading
         import time as _time
+
+        old_title = page.title
+        page.title = L.get('screenshot_in_progress', '截图中...')
+        page.window.to_front()
+        page.update()
 
         save_dir = work_dir_dropdown.value or str(Path.cwd() / "screenshots")
         script = str(Path(__file__).parent.parent / "tools" / "screenshot_tool.py")
@@ -936,6 +943,9 @@ def create_api_page(state):
                 [sys.executable, script, save_dir],
                 capture_output=True, text=True
             )
+            page.title = old_title
+            page.window.to_front()
+            page.update()
             if result.returncode == 0:
                 path = result.stdout.strip()
                 if path and Path(path).exists():
@@ -944,12 +954,20 @@ def create_api_page(state):
 
         threading.Thread(target=run, daemon=True).start()
 
+    screenshot_btn.on_click = take_screenshot
+
     # 路径抓取功能
+    pick_path_btn = ft.ElevatedButton(L.get('pick_path', '复制路径'), icon=ft.Icons.LINK, width=110, tooltip="选择文件复制绝对路径")
+
     def pick_path(e):
         """启动路径抓取工具"""
         import subprocess
         import threading
 
+        old_title = page.title
+        in_progress_text = L.get('pick_path_in_progress', '复制路径中...')
+        pick_path_btn.text = in_progress_text
+        page.title = in_progress_text
         page.window.minimized = True
         page.update()
 
@@ -960,6 +978,9 @@ def create_api_page(state):
                 [sys.executable, script],
                 capture_output=True, text=True
             )
+            pick_path_btn.text = L.get('pick_path', '复制路径')
+            page.title = old_title
+            page.update()
             if result.returncode == 0:
                 path = result.stdout.strip()
                 if path:
@@ -967,6 +988,8 @@ def create_api_page(state):
                     show_snackbar(page, L.get('path_copied', f'路径已复制: {path}'))
 
         threading.Thread(target=run, daemon=True).start()
+
+    pick_path_btn.on_click = pick_path
 
     # 快捷键设置
     from ..hotkey import load_hotkey, update_hotkey, update_copypath_hotkey
@@ -1022,7 +1045,7 @@ def create_api_page(state):
             if captured_keys:
                 new_key = "+".join(p.lower() for p in captured_keys)
                 if key_type == "screenshot":
-                    update_hotkey(new_key, work_dir_dropdown.value)
+                    update_hotkey(new_key, work_dir_dropdown.value, page)
                     hotkey_btn.text = f"截图 {'+'.join(captured_keys)}"
                 else:
                     update_copypath_hotkey(new_key)
@@ -1086,9 +1109,11 @@ def create_api_page(state):
         ft.Row([
             prompt_dropdown,
             ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),
-            ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, on_click=take_screenshot, width=100, tooltip="截图保留一周"),
+        ], spacing=10),
+        ft.Row([
+            screenshot_btn,
             hotkey_btn,
-            ft.ElevatedButton(L.get('pick_path', '复制路径'), icon=ft.Icons.LINK, on_click=pick_path, width=110, tooltip="选择文件复制绝对路径"),
+            pick_path_btn,
             copypath_btn,
         ], spacing=10),
     ], expand=True, spacing=10)

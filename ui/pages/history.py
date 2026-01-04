@@ -141,8 +141,8 @@ def create_history_page(state):
 
         history_stats.value = f"{L.get('history_projects', '项目')}: {len(projects)}"
 
-        # Claude: 快速获取前10个项目的cwd
-        if current_cli == 'claude' and mgr:
+        # 快速获取前10个项目的cwd
+        if mgr:
             projects_with_cwd = mgr.list_projects(with_cwd=True, limit=10)
             cwd_map = {name: cwd for name, cwd in projects_with_cwd}
         else:

@@ -111,6 +111,10 @@ def create_api_page(state):
     if current_work_dir and current_work_dir not in work_dir_history:
         work_dir_history.insert(0, current_work_dir)
 
+    # 共享 FilePicker（避免重复创建）
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
+
     def build_workdir_options():
         opts = [ft.dropdown.Option(d, d[-50:] if len(d) > 50 else d) for d in work_dir_history[:10]]
         return opts
@@ -294,7 +298,7 @@ def create_api_page(state):
         provider_data = cfg.get('provider', {})
 
         name_field = ft.TextField(label=L['name'], value=cfg.get('label', ''), expand=True)
-        tags_field = ft.TextField(label=L.get('tags', '标签'), value=cfg.get('tags', ''), expand=True, hint_text='用逗号分隔')
+        tags_field = ft.TextField(label=L.get('tags', '标签'), value=cfg.get('tags', ''), expand=True, hint_text=L.get('tags_hint', '用逗号分隔'))
 
         # CLI 下拉
         cli_dropdown = ft.Dropdown(
@@ -627,10 +631,8 @@ def create_api_page(state):
                 with open(result.path, 'w', encoding='utf-8') as f:
                     json.dump({'configs': state.configs}, f, ensure_ascii=False, indent=2)
                 show_snackbar(page, L['exported_to'].format(result.path))
-        picker = ft.FilePicker(on_result=on_result)
-        page.overlay.append(picker)
-        page.update()
-        picker.save_file(file_name='api_configs.json', allowed_extensions=['json'])
+        file_picker.on_result = on_result
+        file_picker.save_file(file_name='api_configs.json', allowed_extensions=['json'])
 
     def import_configs(e):
         def on_result(result):
@@ -645,10 +647,8 @@ def create_api_page(state):
                     show_snackbar(page, L['imported_count'].format(len(imported)))
                 except Exception as ex:
                     show_snackbar(page, str(ex))
-        picker = ft.FilePicker(on_result=on_result)
-        page.overlay.append(picker)
-        page.update()
-        picker.pick_files(allowed_extensions=['json'])
+        file_picker.on_result = on_result
+        file_picker.pick_files(allowed_extensions=['json'])
 
     def show_sync_dialog(e):
         """显示云同步对话框"""
@@ -715,10 +715,8 @@ def create_api_page(state):
                 save_work_dir(result.path)
                 work_dir_dropdown.options = build_workdir_options()
                 page.update()
-        picker = ft.FilePicker(on_result=on_result)
-        page.overlay.append(picker)
-        page.update()
-        picker.get_directory_path(initial_directory=work_dir_dropdown.value or None)
+        file_picker.on_result = on_result
+        file_picker.get_directory_path(initial_directory=work_dir_dropdown.value or None)
 
     def refresh_terminals_click(e):
         state.terminals = detect_terminals()
@@ -909,7 +907,7 @@ def create_api_page(state):
         page.open(dlg)
 
     # 截图功能
-    screenshot_btn = ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, width=100, tooltip="截图保留一周")
+    screenshot_btn = ft.ElevatedButton(L.get('screenshot', '截图'), icon=ft.Icons.SCREENSHOT, width=100, tooltip=L.get('screenshot_tooltip', '截图保留一周'))
 
     def take_screenshot(e):
         """启动截图工具 - 使用子进程避免线程问题"""
@@ -922,17 +920,18 @@ def create_api_page(state):
         page.window.to_front()
         page.update()
 
-        save_dir = work_dir_dropdown.value or str(Path.cwd() / "screenshots")
+        save_dir = str(Path(__file__).parent.parent.parent / "screenshots")
         script = str(Path(__file__).parent.parent / "tools" / "screenshot_tool.py")
 
-        # 清理一周前的截图
+        # 清理过期截图
         def cleanup_old():
             try:
                 d = Path(save_dir)
                 if d.exists():
-                    week_ago = _time.time() - 7 * 86400
+                    cleanup_days = state.settings.get('screenshot_cleanup_days', 7)
+                    cutoff = _time.time() - cleanup_days * 86400
                     for f in d.glob("screenshot_*.png"):
-                        if f.stat().st_mtime < week_ago:
+                        if f.stat().st_mtime < cutoff:
                             f.unlink()
             except Exception:
                 pass
@@ -957,7 +956,7 @@ def create_api_page(state):
     screenshot_btn.on_click = take_screenshot
 
     # 路径抓取功能
-    pick_path_btn = ft.ElevatedButton(L.get('pick_path', '复制路径'), icon=ft.Icons.LINK, width=110, tooltip="选择文件复制绝对路径")
+    pick_path_btn = ft.ElevatedButton(L.get('pick_path', '复制路径'), icon=ft.Icons.LINK, width=110, tooltip=L.get('pick_path_tooltip', '选择文件复制绝对路径'))
 
     def pick_path(e):
         """启动路径抓取工具"""
@@ -1018,6 +1017,13 @@ def create_api_page(state):
         key_display = ft.Text("请按下快捷键...", size=16, weight=ft.FontWeight.BOLD)
         hook_id = [None]
 
+        # 截图清理周期（仅截图对话框显示）
+        cleanup_days = state.settings.get('screenshot_cleanup_days', 7)
+        cleanup_field = ft.TextField(
+            label=L.get('screenshot_cleanup_days', '截图清理周期(天)'),
+            value=str(cleanup_days), width=180, keyboard_type=ft.KeyboardType.NUMBER
+        ) if key_type == "screenshot" else None
+
         def on_key(event):
             if event.event_type != 'down':
                 return
@@ -1051,6 +1057,15 @@ def create_api_page(state):
                     update_copypath_hotkey(new_key)
                     copypath_btn.text = f"路径 {'+'.join(captured_keys)}"
                 show_snackbar(page, f'快捷键已设置: {"+".join(captured_keys)}')
+            # 保存清理周期
+            if cleanup_field:
+                try:
+                    days = int(cleanup_field.value)
+                    if days > 0:
+                        state.settings['screenshot_cleanup_days'] = days
+                        save_settings(state.settings)
+                except ValueError:
+                    pass
             page.close(dlg)
 
         def cancel(e):
@@ -1058,14 +1073,19 @@ def create_api_page(state):
                 kb.unhook(hook_id[0])
             page.close(dlg)
 
+        content_items = [
+            ft.Text(f"当前快捷键为：{current_hk}", size=14),
+            key_display,
+        ]
+        if cleanup_field:
+            content_items.append(ft.Divider())
+            content_items.append(cleanup_field)
+
         dlg = ft.AlertDialog(
             title=ft.Text(title),
             content=ft.Container(
-                ft.Column([
-                    ft.Text(f"当前快捷键为：{current_hk}", size=14),
-                    key_display,
-                ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                width=250, height=80,
+                ft.Column(content_items, spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                width=250, height=150 if key_type == "screenshot" else 80,
             ),
             actions=[
                 ft.TextButton(L['cancel'], on_click=cancel),
@@ -1086,7 +1106,7 @@ def create_api_page(state):
                 ft.OutlinedButton(L['edit'], icon=ft.Icons.EDIT, on_click=edit_config, width=120),
                 ft.OutlinedButton(L['delete'], icon=ft.Icons.DELETE, on_click=delete_config, width=120),
                 ft.OutlinedButton(L['copy_key'], icon=ft.Icons.COPY, on_click=copy_config_key, width=120),
-                ft.OutlinedButton(L.get('validate_key', '验证'), icon=ft.Icons.VERIFIED, on_click=validate_config_key, width=120),
+                ft.OutlinedButton(L.get('validate_key', '验证'), icon=ft.Icons.VERIFIED, on_click=validate_config_key, width=130),
                 ft.OutlinedButton(L['move_up'], icon=ft.Icons.ARROW_UPWARD, on_click=move_up, width=120),
                 ft.OutlinedButton(L['move_down'], icon=ft.Icons.ARROW_DOWNWARD, on_click=move_down, width=120),
                 ft.OutlinedButton(L['export'], icon=ft.Icons.UPLOAD, on_click=export_configs, width=120),

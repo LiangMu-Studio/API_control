@@ -11,21 +11,30 @@ from pathlib import Path
 # 单实例锁（Windows）
 if sys.platform == 'win32':
     import ctypes
+    from ctypes import wintypes
 
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "AI_CLI_Manager_SingleInstance")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        # 查找并激活已有窗口
-        hwnd = ctypes.windll.user32.FindWindowW(None, None)
-        while hwnd:
+        # 使用 EnumWindows 查找窗口（更可靠）
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        found_hwnd = [None]
+
+        def enum_callback(hwnd, lparam):
             length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
             if length > 0:
                 buf = ctypes.create_unicode_buffer(length + 1)
                 ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
-                if "AI CLI Manager" in buf.value:
-                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    break
-            hwnd = ctypes.windll.user32.GetWindow(hwnd, 2)  # GW_HWNDNEXT
+                if f"AI CLI Manager v" in buf.value:
+                    found_hwnd[0] = hwnd
+                    return False  # 停止枚举
+            return True
+
+        ctypes.windll.user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+        if found_hwnd[0]:
+            hwnd = found_hwnd[0]
+            # 如果窗口最小化或隐藏，先恢复
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
         sys.exit(0)
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs

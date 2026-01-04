@@ -22,9 +22,12 @@ DEBUG = False
 TRASH_RETENTION_DAYS = 7
 
 def show_snackbar(page, text, duration=1000):
-    """显示 SnackBar 提示，默认 1 秒后自动关闭"""
-    page.open(ft.SnackBar(ft.Text(text), duration=duration))
-    page.update()
+    """显示 SnackBar 提示，默认 1 秒后自动关闭（线程安全）"""
+    def do_show():
+        page.open(ft.SnackBar(ft.Text(text), duration=duration))
+        page.update()
+    # 使用 run_thread 确保在主线程执行 UI 更新
+    page.run_thread(do_show)
 
 
 # ========== 主题配置 ==========
@@ -299,7 +302,7 @@ def save_settings(settings):
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
 def detect_terminals():
-    terminals = []
+    terminals = {}
     if sys.platform == 'win32':
         candidates = [
             ('Windows Terminal', 'wt.exe'),
@@ -308,7 +311,7 @@ def detect_terminals():
         ]
         for name, exe in candidates:
             if shutil.which(exe):
-                terminals.append({'name': name, 'command': exe})
+                terminals[name] = exe
     else:
         candidates = [
             ('GNOME Terminal', 'gnome-terminal'),
@@ -318,18 +321,18 @@ def detect_terminals():
         ]
         for name, cmd in candidates:
             if shutil.which(cmd.split()[0]):
-                terminals.append({'name': name, 'command': cmd})
+                terminals[name] = cmd
     return terminals
 
 def detect_python_envs():
-    envs = []
+    envs = {}
     try:
         result = subprocess.run(['conda', 'env', 'list', '--json'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             data = json.loads(result.stdout)
             for env_path in data.get('envs', []):
                 env_name = Path(env_path).name
-                envs.append({'name': f'conda: {env_name}', 'path': env_path, 'type': 'conda'})
+                envs[f'conda: {env_name}'] = env_path
     except:
         pass
     return envs

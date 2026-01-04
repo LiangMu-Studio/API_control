@@ -162,20 +162,17 @@ def create_prompts_page(state):
             state.prompt_db.save(new_prompt)
             state.refresh_prompts()
             refresh_prompt_list()
-            dlg.open = False
-            state.page.update()
+            state.page.close(dlg)
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
             content=ft.Column([name_field, category_field, content_field], tight=True, spacing=10, width=500, height=350),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or state.page.update()),
+                ft.TextButton(L['cancel'], on_click=lambda e: state.page.close(dlg)),
                 ft.TextButton(L['save'], on_click=save_prompt),
             ],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     prompt_page = ft.Column([
         global_container,

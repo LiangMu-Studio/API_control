@@ -140,8 +140,8 @@ class MCPRegistry:
                         INSERT INTO servers_fts(rowid, name, description) VALUES (new.rowid, new.name, new.description);
                     END;
                 ''')
-            except:
-                pass
+            except sqlite3.OperationalError:
+                pass  # FTS5 可能不支持，忽略
             conn.commit()
 
     def _guess_category(self, name: str, desc: str) -> str:
@@ -240,7 +240,7 @@ class MCPRegistry:
                         params.append(category)
                     sql += f' LIMIT {limit}'
                     rows = conn.execute(sql, params).fetchall()
-                except:
+                except sqlite3.OperationalError:
                     sql = 'SELECT * FROM servers WHERE (name LIKE ? OR description LIKE ?)'
                     params = [f'%{keyword}%', f'%{keyword}%']
                     if category and category != '全部':
@@ -282,7 +282,7 @@ class MCPRegistry:
         try:
             last = datetime.fromisoformat(stats['updated_at'])
             return (datetime.now() - last).days >= days
-        except:
+        except (ValueError, KeyError):
             return True
 
 
@@ -298,8 +298,8 @@ class TrashManager:
         if self.manifest_file.exists():
             try:
                 return json.loads(self.manifest_file.read_text(encoding='utf-8'))
-            except:
-                pass
+            except (json.JSONDecodeError, OSError):
+                pass  # 文件损坏或读取失败
         return {"items": []}
 
     def _save_manifest(self, manifest: dict):
@@ -323,7 +323,7 @@ class TrashManager:
             })
             self._save_manifest(manifest)
             return True
-        except:
+        except (OSError, shutil.Error):
             return False
 
     def restore_from_trash(self, item: dict) -> bool:
@@ -345,7 +345,7 @@ class TrashManager:
             manifest["items"] = [i for i in manifest["items"] if i["session_id"] != item["session_id"]]
             self._save_manifest(manifest)
             return True
-        except:
+        except (OSError, shutil.Error, KeyError):
             return False
 
     def cleanup_expired(self) -> int:
@@ -421,8 +421,8 @@ class HistoryManager:
                             if not cwd:
                                 cwd = data.get('cwd')
                             messages.append(data)
-                    except:
-                        pass
+                    except json.JSONDecodeError:
+                        continue  # 跳过损坏的行
             if not messages:
                 return None
             return {
@@ -430,7 +430,7 @@ class HistoryManager:
                 'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
                 'size': session_file.stat().st_size
             }
-        except:
+        except (OSError, json.JSONDecodeError):
             return None
 
     def delete_session(self, project_name: str, session_id: str, info: dict) -> bool:
@@ -506,8 +506,8 @@ class CodexHistoryManager:
                             if payload.get('type') in ('user_message', 'agent_message'):
                                 messages.append({'role': 'user' if 'user' in payload.get('type') else 'assistant',
                                                 'content': payload.get('message', '')})
-                    except:
-                        pass
+                    except json.JSONDecodeError:
+                        continue  # 跳过损坏的行
             if not messages:
                 return None
             return {
@@ -515,7 +515,7 @@ class CodexHistoryManager:
                 'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
                 'size': session_file.stat().st_size
             }
-        except:
+        except (OSError, json.JSONDecodeError):
             return None
 
     def delete_session(self, date_group: str, session_id: str, info: dict) -> bool:
@@ -541,4 +541,4 @@ class CodexHistoryManager:
 mcp_registry = MCPRegistry(MCP_DB_FILE)
 history_manager = HistoryManager(CLAUDE_DIR) if CLAUDE_DIR.exists() else None
 codex_history_manager = CodexHistoryManager(CODEX_DIR) if CODEX_DIR.exists() else None
-history_cache = {"claude": {}, "codex": {}}
+history_cache = {"claude": None, "codex": None}

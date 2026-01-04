@@ -30,12 +30,12 @@ def create_history_page(state):
         return None
 
     def get_history_data():
-        if history_cache.get(current_cli):
+        if history_cache.get(current_cli) is not None:
             return history_cache[current_cli]
         mgr = get_current_manager()
         if mgr:
             history_cache[current_cli] = mgr.load_sessions()
-        return history_cache.get(current_cli, {})
+        return history_cache.get(current_cli) or {}
 
     def refresh_history_tree(filter_text=''):
         nonlocal last_clicked_idx, all_session_items
@@ -120,7 +120,7 @@ def create_history_page(state):
                         dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
                         time_str = dt.strftime('%m-%d %H:%M')
                     except: time_str = ts[:16]
-                else: time_str = '未知'
+                else: time_str = L.get('unknown', '未知')
                 if date_cutoff and dt and dt < date_cutoff: continue
                 if date_cutoff_end and dt and dt > date_cutoff_end: continue
                 if dt and dt < old_cutoff:
@@ -188,18 +188,26 @@ def create_history_page(state):
         mgr = get_current_manager()
         if not data or not mgr: return
         def do_del(e):
-            dlg.open = False
-            state.page.update()
+            state.page.close(dlg)
             cnt = 0
             for d in data:
                 if mgr.delete_session(d['group'], d['session_id'], d['info']): cnt += 1
-            history_cache[current_cli] = {}
+            history_cache[current_cli] = None
             show_snackbar(state.page, L['history_moved'].format(cnt))
             refresh_history_tree()
-        dlg = ft.AlertDialog(title=ft.Text(L['confirm_delete']), content=ft.Text(L['history_confirm_delete'].format(len(data), TRASH_RETENTION_DAYS)), actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update()), ft.TextButton(L['delete'], on_click=do_del)])
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        dlg = ft.AlertDialog(
+            title=ft.Text(L['confirm_delete']),
+            content=ft.Text(L['history_confirm_delete'].format(len(data), TRASH_RETENTION_DAYS)),
+            actions=[
+                ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg)),
+                ft.TextButton(L['delete'], on_click=do_del)
+            ]
+        )
+        state.page.open(dlg)
+
+    # 共享 FilePicker
+    file_picker = ft.FilePicker()
+    state.page.overlay.append(file_picker)
 
     def export_session(fmt='html'):
         """导出选中会话"""
@@ -219,10 +227,8 @@ def create_history_page(state):
                     show_snackbar(state.page, L.get('export_success', '导出成功: {}').format(result.path))
                 except Exception as ex:
                     show_snackbar(state.page, str(ex))
-        picker = ft.FilePicker(on_result=on_result)
-        state.page.overlay.append(picker)
-        state.page.update()
-        picker.save_file(file_name=f'session_{sid}.{fmt}', allowed_extensions=[fmt])
+        file_picker.on_result = on_result
+        file_picker.save_file(file_name=f'session_{sid}.{fmt}', allowed_extensions=[fmt])
 
     def export_batch(e):
         """批量导出所有会话"""
@@ -235,10 +241,8 @@ def create_history_page(state):
             if result.path:
                 cnt = export_sessions_batch(all_data, result.path, 'html')
                 show_snackbar(state.page, L.get('export_batch_success', '批量导出 {} 个会话到 {}').format(cnt, result.path))
-        picker = ft.FilePicker(on_result=on_result)
-        state.page.overlay.append(picker)
-        state.page.update()
-        picker.get_directory_path()
+        file_picker.on_result = on_result
+        file_picker.get_directory_path()
 
     batch_delete_btn = ft.TextButton(L['history_delete_selected'], visible=False, on_click=lambda _: del_sessions(list(selected_sessions.values())))
     batch_count_text = ft.Text('', size=12)
@@ -248,6 +252,21 @@ def create_history_page(state):
         batch_count_text.value = L['history_selected_count'].format(len(selected_sessions)) if selected_sessions else ''
 
     cli_dropdown = ft.Dropdown(value='claude', options=[ft.dropdown.Option('claude', 'Claude'), ft.dropdown.Option('codex', 'Codex'), ft.dropdown.Option('gemini', 'Gemini'), ft.dropdown.Option('aider', 'Aider')], width=120)
+    date_dropdown = ft.Dropdown(
+        value='all',
+        options=[
+            ft.dropdown.Option('all', L.get('history_date_all', '全部')),
+            ft.dropdown.Option('today', L.get('history_date_today', '今天')),
+            ft.dropdown.Option('week', L.get('history_date_week', '本周')),
+            ft.dropdown.Option('month', L.get('history_date_month', '本月')),
+        ],
+        width=100
+    )
+    def on_date_change(_):
+        nonlocal date_filter
+        date_filter = date_dropdown.value or 'all'
+        refresh_history_tree(history_search.value or '')
+    date_dropdown.on_change = on_date_change
     def on_cli_change(_):
         nonlocal current_cli
         nc = cli_dropdown.value or 'claude'
@@ -259,7 +278,7 @@ def create_history_page(state):
     history_search.on_submit = lambda e: refresh_history_tree(e.control.value or '')
 
     history_page = ft.Column([
-        ft.Row([ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD), cli_dropdown, history_search, ft.TextButton('刷新', on_click=on_cli_change), batch_count_text, batch_delete_btn,
+        ft.Row([ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD), cli_dropdown, date_dropdown, history_search, ft.TextButton(L.get('refresh', '刷新'), on_click=on_cli_change), batch_count_text, batch_delete_btn,
                 ft.TextButton(L.get('export_html', '导出HTML'), on_click=lambda _: export_session('html')),
                 ft.TextButton(L.get('export_md', '导出MD'), on_click=lambda _: export_session('md')),
                 ft.TextButton(L.get('export_batch', '批量导出'), on_click=export_batch),

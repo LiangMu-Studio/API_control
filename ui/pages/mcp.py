@@ -19,6 +19,10 @@ def create_mcp_page(state):
     selected_mcp = None
     mcp_fetch_log = []
 
+    # 共享 FilePicker
+    file_picker = ft.FilePicker()
+    state.page.overlay.append(file_picker)
+
     def get_mcp_key(m):
         return m.get('name', '').lower().replace(' ', '-')
 
@@ -155,20 +159,17 @@ def create_mcp_page(state):
                 state.mcp_list.append(new_m)
             state.save_mcp()
             refresh_mcp_tree()
-            dlg.open = False
-            state.page.update()
+            state.page.close(dlg)
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
             content=ft.Column([name_field, category_field, command_field, args_field, env_field], tight=True, spacing=10, width=400),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or state.page.update()),
+                ft.TextButton(L['cancel'], on_click=lambda e: state.page.close(dlg)),
                 ft.TextButton(L['save'], on_click=save_mcp_item),
             ],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def add_from_official(e):
         official_list = ft.ListView(expand=True, spacing=2)
@@ -192,17 +193,15 @@ def create_mcp_page(state):
             state.mcp_list.append(new_m)
             state.save_mcp()
             refresh_mcp_tree()
-            dlg.open = False
+            state.page.close(dlg)
             show_snackbar(state.page, L['mcp_added'].format(1))
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_select_official']),
             content=ft.Container(official_list, width=450, height=400),
-            actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update())],
+            actions=[ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg))],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def browse_mcp_market(e):
         import webbrowser
@@ -217,11 +216,9 @@ def create_mcp_page(state):
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_market']),
             content=ft.Container(market_list, width=400, height=250),
-            actions=[ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or state.page.update())],
+            actions=[ft.TextButton(L['cancel'], on_click=lambda e: state.page.close(dlg))],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def parse_mcp_json(data: dict) -> list:
         results = []
@@ -279,11 +276,8 @@ def create_mcp_page(state):
                     show_snackbar(state.page, L['mcp_no_valid_config'])
             except Exception as ex:
                 show_snackbar(state.page, L['mcp_import_fail'].format(ex))
-            state.page.update()
-        picker = ft.FilePicker(on_result=on_result)
-        state.page.overlay.append(picker)
-        state.page.update()
-        picker.pick_files(allowed_extensions=['json'], dialog_title=L['mcp_import_file'])
+        file_picker.on_result = on_result
+        file_picker.pick_files(allowed_extensions=['json'], dialog_title=L['mcp_import_file'])
 
     def import_from_text(e):
         text_field = ft.TextField(label=L['mcp_import_text_desc'], multiline=True, min_lines=10, max_lines=15, expand=True)
@@ -296,7 +290,7 @@ def create_mcp_page(state):
                     state.mcp_list.extend(items)
                     state.save_mcp()
                     refresh_mcp_tree()
-                    dlg.open = False
+                    state.page.close(dlg)
                     show_snackbar(state.page, L['mcp_added'].format(len(items)))
                 else:
                     show_snackbar(state.page, L['mcp_no_valid_config'])
@@ -304,39 +298,43 @@ def create_mcp_page(state):
                 show_snackbar(state.page, L['mcp_invalid_json'])
             except Exception as ex:
                 show_snackbar(state.page, L['mcp_import_fail'].format(ex))
-            state.page.update()
 
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_import_text']),
-            content=ft.Container(ft.Column([ft.Text(L['mcp_import_format'], size=12, color=ft.Colors.GREY_600), text_field], tight=True), width=500, height=350),
+            content=ft.Container(ft.Column([
+                ft.Text(L['mcp_import_format'], size=12, color=ft.Colors.GREY_600), text_field
+            ], tight=True), width=500, height=350),
             actions=[
-                ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update()),
+                ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg)),
                 ft.ElevatedButton(L['import'], on_click=do_import),
             ],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def show_import_menu(e):
+        def close_and_run(func):
+            state.page.close(dlg)
+            func(e)
+
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_import_title']),
             content=ft.Column([
-                ft.ListTile(leading=ft.Icon(ft.Icons.CONTENT_PASTE, color=ft.Colors.BLUE), title=ft.Text(L['mcp_import_clipboard']),
+                ft.ListTile(leading=ft.Icon(ft.Icons.CONTENT_PASTE, color=ft.Colors.BLUE),
+                           title=ft.Text(L['mcp_import_clipboard']),
                            subtitle=ft.Text(L['mcp_import_clipboard_desc']),
-                           on_click=lambda e: (setattr(dlg, 'open', False), state.page.update(), import_from_clipboard(e))),
-                ft.ListTile(leading=ft.Icon(ft.Icons.FILE_OPEN, color=ft.Colors.GREEN), title=ft.Text(L['mcp_import_file']),
+                           on_click=lambda _: close_and_run(import_from_clipboard)),
+                ft.ListTile(leading=ft.Icon(ft.Icons.FILE_OPEN, color=ft.Colors.GREEN),
+                           title=ft.Text(L['mcp_import_file']),
                            subtitle=ft.Text(L['mcp_import_file_desc']),
-                           on_click=lambda e: (setattr(dlg, 'open', False), state.page.update(), import_from_file(e))),
-                ft.ListTile(leading=ft.Icon(ft.Icons.TEXT_FIELDS, color=ft.Colors.ORANGE), title=ft.Text(L['mcp_import_text']),
+                           on_click=lambda _: close_and_run(import_from_file)),
+                ft.ListTile(leading=ft.Icon(ft.Icons.TEXT_FIELDS, color=ft.Colors.ORANGE),
+                           title=ft.Text(L['mcp_import_text']),
                            subtitle=ft.Text(L['mcp_import_text_desc']),
-                           on_click=lambda e: (setattr(dlg, 'open', False), state.page.update(), import_from_text(e))),
+                           on_click=lambda _: close_and_run(import_from_text)),
             ], tight=True, spacing=0),
-            actions=[ft.TextButton(L['cancel'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update())],
+            actions=[ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg))],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def show_mcp_repository(e):
         stats = mcp_registry.get_stats()
@@ -350,13 +348,13 @@ def create_mcp_page(state):
         progress = ft.ProgressBar(width=400)
         loading_dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_sync_title']),
-            content=ft.Column([progress, status_text, ft.Text(L['mcp_sync_sources'], size=12, color=ft.Colors.GREY_600)],
-                             tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            content=ft.Column([
+                progress, status_text,
+                ft.Text(L['mcp_sync_sources'], size=12, color=ft.Colors.GREY_600)
+            ], tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             modal=True,
         )
-        state.page.overlay.append(loading_dlg)
-        loading_dlg.open = True
-        state.page.update()
+        state.page.open(loading_dlg)
 
         def do_sync():
             mcp_fetch_log.clear()
@@ -365,8 +363,7 @@ def create_mcp_page(state):
                 status_text.value = msg
                 state.page.update()
             new_count, errors = mcp_registry.fetch_all(callback=on_progress)
-            loading_dlg.open = False
-            state.page.update()
+            state.page.close(loading_dlg)
             stats = mcp_registry.get_stats()
             if errors:
                 mcp_fetch_log.extend(errors)
@@ -382,12 +379,12 @@ def create_mcp_page(state):
         log_text = "\n".join(mcp_fetch_log)
         dlg = ft.AlertDialog(
             title=ft.Text(L['mcp_sync_fail'], color=ft.Colors.RED),
-            content=ft.Container(ft.TextField(value=log_text, multiline=True, read_only=True, min_lines=15, max_lines=20, expand=True), width=600, height=400),
-            actions=[ft.TextButton(L['close'], on_click=lambda _: setattr(dlg, 'open', False) or state.page.update())],
+            content=ft.Container(ft.TextField(
+                value=log_text, multiline=True, read_only=True, min_lines=15, max_lines=20, expand=True
+            ), width=600, height=400),
+            actions=[ft.TextButton(L['close'], on_click=lambda _: state.page.close(dlg))],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     def show_repository_browser(stats: dict):
         cat_keys = ['cloud', 'map', 'media', 'security', 'tool', 'dev', 'search', 'db', 'file', 'news', 'calendar', 'model',
@@ -461,9 +458,12 @@ def create_mcp_page(state):
             if added:
                 state.save_mcp()
                 refresh_mcp_tree()
-                dlg.open = False
+                state.page.close(dlg)
                 show_snackbar(state.page, L['mcp_added'].format(added))
-            state.page.update()
+
+        def close_and_resync(e):
+            state.page.close(dlg)
+            sync_mcp_repository(e)
 
         search_field.on_change = filter_list
         category_dropdown.on_change = filter_list
@@ -474,14 +474,19 @@ def create_mcp_page(state):
             title=ft.Row([
                 ft.Text(L['mcp_repo_title'].format(stats['total']), weight=ft.FontWeight.BOLD),
                 ft.Text(L['mcp_updated'].format(updated), size=11, color=ft.Colors.GREY_500),
-                ft.IconButton(ft.Icons.REFRESH, on_click=lambda e: (setattr(dlg, 'open', False), state.page.update(), sync_mcp_repository(e)), tooltip=L['mcp_resync']),
+                ft.IconButton(ft.Icons.REFRESH, on_click=close_and_resync, tooltip=L['mcp_resync']),
             ], spacing=10),
-            content=ft.Container(ft.Column([ft.Row([search_field, category_dropdown], spacing=10), ft.Container(result_list, expand=True)], spacing=10), width=650, height=500),
-            actions=[selected_count_text, ft.TextButton(L['cancel'], on_click=lambda e: setattr(dlg, 'open', False) or state.page.update()), ft.ElevatedButton(L['mcp_add_selected'], on_click=add_selected)],
+            content=ft.Container(ft.Column([
+                ft.Row([search_field, category_dropdown], spacing=10),
+                ft.Container(result_list, expand=True)
+            ], spacing=10), width=650, height=500),
+            actions=[
+                selected_count_text,
+                ft.TextButton(L['cancel'], on_click=lambda e: state.page.close(dlg)),
+                ft.ElevatedButton(L['mcp_add_selected'], on_click=add_selected)
+            ],
         )
-        state.page.overlay.append(dlg)
-        dlg.open = True
-        state.page.update()
+        state.page.open(dlg)
 
     # 启动时检查自动更新
     def check_auto_update():

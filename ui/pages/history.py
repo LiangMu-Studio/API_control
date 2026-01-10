@@ -1,9 +1,12 @@
 ﻿# AI CLI Manager - History Page
 import flet as ft
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from ..common import THEMES, TRASH_RETENTION_DAYS, show_snackbar
 from ..database import history_manager, codex_history_manager
+
+MAX_CACHE_SIZE = 50  # 最大缓存项目数
 
 
 def shorten_path(path: str, max_len: int = 40) -> str:
@@ -32,7 +35,7 @@ def create_history_page(state):
     selected_sessions = {}
     all_session_items = []
     last_clicked_idx = -1
-    loaded_projects = {}  # 已加载的项目数据缓存
+    loaded_projects = OrderedDict()  # LRU 缓存
 
     history_tree = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True)
     history_stats = ft.Text("", size=12, color=ft.Colors.GREY_600)
@@ -62,6 +65,7 @@ def create_history_page(state):
     def load_project_content(grp_name, content_col, tile, title_text):
         """懒加载项目内容"""
         if grp_name in loaded_projects:
+            loaded_projects.move_to_end(grp_name)  # LRU: 移到末尾
             sessions = loaded_projects[grp_name]
         else:
             mgr = get_current_manager()
@@ -69,6 +73,9 @@ def create_history_page(state):
                 return
             sessions = mgr.load_project(grp_name)
             loaded_projects[grp_name] = sessions
+            # 超出限制时删除最旧的
+            while len(loaded_projects) > MAX_CACHE_SIZE:
+                loaded_projects.popitem(last=False)
 
         content_col.controls.clear()
         if not sessions:
@@ -92,7 +99,7 @@ def create_history_page(state):
             ts = info.get('last_timestamp', '')
             try:
                 time_str = datetime.fromisoformat(ts.replace('Z', '+00:00')).strftime('%m-%d %H:%M') if ts else L.get('unknown', '未知')
-            except:
+            except (ValueError, AttributeError):
                 time_str = ts[:16] if ts else L.get('unknown', '未知')
             size_str = f'{info.get("size", 0)/1024:.1f}KB'
             turns = count_real_turns(info.get('messages', []))
@@ -131,20 +138,27 @@ def create_history_page(state):
         history_progress.value = 0
         state.page.update()
 
-        # 快速获取前50个项目（按日期倒序，不会卡住）
-        projects = mgr.list_projects(limit=50) if hasattr(mgr, 'list_projects') else []
-        if not projects:
+        # 使用 with_cwd=True 获取项目列表和真实路径
+        projects_data = mgr.list_projects(with_cwd=True, limit=50) if hasattr(mgr, 'list_projects') else []
+        if not projects_data:
             history_stats.value = L['history_no_records']
             history_progress.visible = False
             state.page.update()
             return
 
-        history_stats.value = f"{L.get('history_projects', '项目')}: {len(projects)}"
+        history_stats.value = f"{L.get('history_projects', '项目')}: {len(projects_data)}"
 
-        # cwd_map 直接用 projects（Codex 的 list_projects 返回的就是 cwd）
-        cwd_map = {p: p for p in projects}
-        if mgr == history_manager:
-            cwd_map = {}
+        # 构建 cwd_map: project_id -> real_cwd
+        cwd_map = {}
+        projects = []
+        for item in projects_data:
+            if isinstance(item, tuple):
+                project_id, real_cwd = item
+            else:
+                project_id = item
+                real_cwd = ''
+            projects.append(project_id)
+            cwd_map[project_id] = real_cwd or project_id
 
         total = len(projects)
         for i, grp_name in enumerate(projects):
@@ -153,13 +167,13 @@ def create_history_page(state):
             if i % 5 == 0:  # 每5个更新一次UI
                 state.page.update()
 
-            if filter_text and filter_text.lower() not in grp_name.lower():
+            # 使用真实路径或项目名显示
+            display_path = cwd_map.get(grp_name, grp_name)
+            if filter_text and filter_text.lower() not in display_path.lower() and filter_text.lower() not in grp_name.lower():
                 continue
             content_col = ft.Column([], spacing=2)
-            # 优先用预加载的cwd
-            display_path = cwd_map.get(grp_name, '') or grp_name
             title_text = ft.Text(shorten_path(display_path, 40), size=14, weight=ft.FontWeight.W_500)
-            title_text.tooltip = display_path if display_path != grp_name else grp_name
+            title_text.tooltip = display_path
             folder_btn = ft.IconButton(ft.Icons.FOLDER_OPEN, icon_size=16, tooltip=title_text.tooltip)
             def open_folder(e, txt=title_text):
                 import subprocess, sys

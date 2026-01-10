@@ -297,7 +297,8 @@ def main(page: ft.Page):
         def tray_screenshot():
             import subprocess
             script = str(Path(__file__).parent / "ui" / "tools" / "screenshot_tool.py")
-            subprocess.Popen([sys.executable, script, ""], creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            save_dir = str(Path(__file__).parent / "screenshots")
+            subprocess.Popen([sys.executable, script, save_dir], creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
 
         def tray_copy_path():
             import subprocess

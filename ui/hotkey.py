@@ -92,6 +92,9 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
 
     hotkey = hotkey or load_hotkey("screenshot")
     script = str(Path(__file__).parent / "tools" / "screenshot_tool.py")
+    # 默认截图目录
+    if not save_dir:
+        save_dir = str(Path(__file__).parent.parent / "screenshots")
 
     def take_screenshot():
         old_title = None

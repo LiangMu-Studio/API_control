@@ -63,7 +63,12 @@ class ScreenshotTool:
     PRESET_COLORS = ["#ff0000", "#ffff00", "#0000ff"]  # 红、黄、蓝
 
     def __init__(self, save_dir: str = None):
-        self.save_dir = Path(save_dir) if save_dir else Path.cwd() / "screenshots"
+        # 确保有有效的保存目录
+        if save_dir and save_dir.strip():
+            self.save_dir = Path(save_dir)
+        else:
+            # 默认使用项目根目录下的 screenshots
+            self.save_dir = Path(__file__).parent.parent.parent / "screenshots"
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
         self.root = None

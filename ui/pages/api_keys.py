@@ -396,28 +396,60 @@ def create_api_page(state):
         page.open(dlg)
 
     def _render_message(msg, step):
-        """渲染单条消息"""
+        """渲染单条消息 - 复刻 DEV 版气泡设计（无头像）"""
         role = msg.role if hasattr(msg, 'role') else msg.get('role', '')
-        is_user = role == 'user'
+        # 检查是否是真实用户消息（排除工具结果返回的假用户消息）
+        is_real_user = getattr(msg, 'is_real_user', True) if hasattr(msg, 'is_real_user') else True
+        is_user = role == 'user' and is_real_user
+        is_tool_result = role == 'user' and not is_real_user
+
         # 获取文本内容
-        if hasattr(msg, 'content_blocks'):
-            text_parts = [b.text for b in msg.content_blocks if b.text]
+        if hasattr(msg, 'content_blocks') and msg.content_blocks:
+            text_parts = []
+            for b in msg.content_blocks:
+                t = b.text if hasattr(b, 'text') else None
+                if t:
+                    text_parts.append(t)
             text = '\n'.join(text_parts)[:800]
+        elif hasattr(msg, 'get_text'):
+            # 使用 Rust 的 get_text 方法
+            text = msg.get_text()[:800]
         else:
             text = msg.get('text', '')[:800]
+
+        # 工具结果不显示文本内容（通常很长），只显示标记
+        if is_tool_result:
+            label_text = "Tool Result"
+            label_bg = ft.Colors.ORANGE_500
+            border_color = ft.Colors.ORANGE_500
+            bg_color = ft.Colors.with_opacity(0.04, ft.Colors.ORANGE)
+            text = f"[工具返回结果 - {len(text)} 字符]" if text else "[工具返回]"
+        elif is_user:
+            label_text = "User"
+            label_bg = ft.Colors.BLUE_500
+            border_color = ft.Colors.BLUE_500
+            bg_color = ft.Colors.with_opacity(0.06, ft.Colors.BLUE)
+        else:
+            label_text = "Assistant"
+            label_bg = ft.Colors.GREEN_500
+            border_color = ft.Colors.GREEN_500
+            bg_color = ft.Colors.with_opacity(0.06, ft.Colors.GREEN)
 
         return ft.Container(
             content=ft.Column([
                 ft.Row([
                     ft.Text(f"#{step}", size=10, color=ft.Colors.GREY_500),
-                    ft.Text("👤 用户" if is_user else "🤖 AI",
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.BLUE if is_user else ft.Colors.GREEN),
-                ], spacing=5),
+                    ft.Container(
+                        ft.Text(label_text, size=11, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),
+                        bgcolor=label_bg, padding=ft.padding.symmetric(horizontal=8, vertical=2), border_radius=4,
+                    ),
+                ], spacing=8),
                 ft.Text(text or '(无内容)', selectable=True, size=13),
-            ], spacing=3),
-            padding=ft.padding.only(left=10, top=5, bottom=5, right=10),
-            border=ft.border.only(left=ft.BorderSide(3, ft.Colors.BLUE if is_user else ft.Colors.GREEN)),
+            ], spacing=4),
+            bgcolor=bg_color,
+            padding=ft.padding.only(left=10, top=8, bottom=8, right=10),
+            border=ft.border.only(left=ft.BorderSide(4, border_color)),
+            border_radius=8,
             margin=ft.margin.only(bottom=8),
         )
 
@@ -486,7 +518,7 @@ def create_api_page(state):
                 ))
 
                 # 后段消息
-                start_step = paginated.total - len(paginated.last) + 1
+                start_step = paginated.total_messages - len(paginated.last) + 1
                 for i, msg in enumerate(paginated.last):
                     content_col.controls.append(_render_message(msg, start_step + i))
             else:
@@ -526,20 +558,18 @@ def create_api_page(state):
 
         def do_load():
             opts = build_session_options(cwd, force_refresh=force_refresh)
+            # 在后台线程中计算默认选中值，减少主线程工作
+            default_value = '__none__'
+            if len(opts) > 1:
+                last_session = state.settings.get('last_session', '')
+                opt_keys = {opt.key for opt in opts}
+                if last_session in opt_keys:
+                    default_value = last_session
+                else:
+                    default_value = opts[-2].key  # 最新会话
             def update_ui():
                 session_dropdown.options = opts
-                session_dropdown.value = '__none__'
-                if len(opts) > 1:
-                    # 恢复上次选中的会话
-                    last_session = state.settings.get('last_session', '')
-                    found = False
-                    for opt in opts:
-                        if opt.key == last_session:
-                            session_dropdown.value = last_session
-                            found = True
-                            break
-                    if not found:
-                        session_dropdown.value = opts[-2].key  # 最新会话
+                session_dropdown.value = default_value
                 _session_loaded[0] = True
                 _session_loading[0] = False
                 page.update()
@@ -547,16 +577,6 @@ def create_api_page(state):
 
         import threading
         threading.Thread(target=do_load, daemon=True).start()
-
-    def refresh_session_dropdown(force_refresh=False):
-        cwd = work_dir_input.value
-        session_dropdown.options = build_session_options(cwd, force_refresh=force_refresh)
-        session_dropdown.value = '__none__'
-        # 默认选中最新会话（最后一个非 __none__ 选项）
-        if len(session_dropdown.options) > 1:
-            session_dropdown.value = session_dropdown.options[-2].key
-        _session_loaded[0] = True
-        page.update()
 
     def save_selected_session(e):
         """保存选中的会话到 settings"""
@@ -816,7 +836,7 @@ def create_api_page(state):
 
         def on_model_change(e):
             custom_model_field.visible = (model_dropdown.value == '__custom__')
-            page.update()
+            custom_model_field.update()
 
         model_dropdown.on_change = on_model_change
 
@@ -832,14 +852,19 @@ def create_api_page(state):
                 model_dropdown.value = None
             custom_model_field.visible = False
             custom_model_field.value = ''
-            page.update()
+            # 只更新变化的控件，不刷新整个页面
+            endpoint_field.update()
+            key_name_field.update()
+            model_dropdown.update()
+            custom_model_field.update()
 
         def on_cli_change(e):
             cli = cli_dropdown.value
             cli_info = CLI_TOOLS.get(cli, CLI_TOOLS['claude'])
             base_url_env_field.value = cli_info.get('base_url_env', 'API_BASE_URL')
             model_env_field.value = ''
-            page.update()
+            base_url_env_field.update()
+            model_env_field.update()
 
         provider_dropdown.on_change = on_provider_change
         cli_dropdown.on_change = on_cli_change

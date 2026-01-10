@@ -47,6 +47,10 @@ class AppState:
         self.expanded_cli = {}
         self.expanded_endpoint = {}
 
+        # 树结构缓存
+        self._tree_cache = None
+        self._tree_cache_hash = None
+
         # UI 组件引用（由页面设置）
         self.config_tree = None
         self.current_key_label = None
@@ -89,8 +93,9 @@ class AppState:
         save_settings(self.settings)
 
     def save_configs(self):
-        """保存配置"""
+        """保存配置并使缓存失效"""
         save_configs(self.configs)
+        self._tree_cache = None  # 使缓存失效
 
     def save_mcp(self):
         """保存 MCP 列表"""
@@ -101,7 +106,12 @@ class AppState:
         self.prompts = self.prompt_db.get_all()
 
     def build_tree_structure(self):
-        """构建三级树形结构：CLI工具 → API端点 → 配置项"""
+        """构建三级树形结构：CLI工具 → API端点 → 配置项（带缓存）"""
+        # 简单缓存：configs 长度和内容 hash
+        cache_key = (len(self.configs), id(self.configs))
+        if self._tree_cache is not None and self._tree_cache_hash == cache_key:
+            return self._tree_cache
+
         tree = {}
         for i, cfg in enumerate(self.configs):
             # 兼容新旧配置格式：优先从 provider.type 映射
@@ -116,6 +126,9 @@ class AppState:
             if endpoint not in tree[cli_type]:
                 tree[cli_type][endpoint] = []
             tree[cli_type][endpoint].append((i, cfg))
+
+        self._tree_cache = tree
+        self._tree_cache_hash = cache_key
         return tree
 
     def select_cli(self, cli_key):

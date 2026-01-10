@@ -1,4 +1,5 @@
-﻿# AI CLI Manager - History Page
+# AI CLI Manager - History Page
+# 复刻 DEV 版 (Tauri) 的历史记录页面设计
 import flet as ft
 from collections import OrderedDict
 from datetime import datetime
@@ -6,11 +7,11 @@ from pathlib import Path
 from ..common import THEMES, TRASH_RETENTION_DAYS, show_snackbar
 from ..database import history_manager, codex_history_manager
 
-MAX_CACHE_SIZE = 50  # 最大缓存项目数
+MAX_CACHE_SIZE = 50
 
 
 def shorten_path(path: str, max_len: int = 40) -> str:
-    """缩短路径显示：D:/xxx/.../yyy，尽量多显示前面"""
+    """缩短路径显示"""
     if len(path) <= max_len:
         return path
     sep = '\\' if '\\' in path else '/'
@@ -32,16 +33,24 @@ def create_history_page(state):
         current_cli = state.configs[last_idx].get('cli_type', 'claude')
     else:
         current_cli = "claude"
-    selected_sessions = {}
-    all_session_items = []
-    last_clicked_idx = -1
-    loaded_projects = OrderedDict()  # LRU 缓存
 
-    history_tree = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True)
-    history_stats = ft.Text("", size=12, color=ft.Colors.GREY_600)
-    history_progress = ft.ProgressBar(visible=False, width=200)
-    history_search = ft.TextField(hint_text=L["history_search"], width=250)
-    history_detail = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True)
+    selected_session_data = [None]  # 当前选中的会话数据
+    loaded_projects = OrderedDict()  # LRU 缓存
+    show_sidebar = [True]  # 侧边栏显示状态
+
+    # 工具图标和颜色映射 - 复刻 DEV 版
+    TOOL_ICONS = {
+        'Read': ('📖', 'bg-blue-100', ft.Colors.BLUE_100),
+        'Write': ('✏️', 'bg-green-100', ft.Colors.GREEN_100),
+        'Edit': ('🔧', 'bg-yellow-100', ft.Colors.YELLOW_100),
+        'Bash': ('💻', 'bg-purple-100', ft.Colors.PURPLE_100),
+        'Glob': ('🔍', 'bg-cyan-100', ft.Colors.CYAN_100),
+        'Grep': ('🔎', 'bg-teal-100', ft.Colors.TEAL_100),
+        'Task': ('🚀', 'bg-pink-100', ft.Colors.PINK_100),
+        'TodoWrite': ('📋', 'bg-amber-100', ft.Colors.AMBER_100),
+        'WebFetch': ('🌐', 'bg-indigo-100', ft.Colors.INDIGO_100),
+        'WebSearch': ('🔍', 'bg-light-blue-100', ft.Colors.LIGHT_BLUE_100),
+    }
 
     def get_current_manager():
         if current_cli == "claude":
@@ -50,177 +59,16 @@ def create_history_page(state):
             return codex_history_manager
         return None
 
-    def on_item_click(e, idx, data):
-        nonlocal last_clicked_idx
-        theme = THEMES[state.theme_mode]
-        for item, _ in all_session_items: item.bgcolor = None
-        selected_sessions.clear()
-        selected_sessions[data['session_id']] = data
-        e.control.bgcolor = theme['selection_bg']
-        last_clicked_idx = idx
-        update_btns()
-        show_detail(data)
-        state.page.update()
-
-    def load_project_content(grp_name, content_col, tile, title_text):
-        """懒加载项目内容"""
-        if grp_name in loaded_projects:
-            loaded_projects.move_to_end(grp_name)  # LRU: 移到末尾
-            sessions = loaded_projects[grp_name]
-        else:
-            mgr = get_current_manager()
-            if not mgr or not hasattr(mgr, 'load_project'):
-                return
-            sessions = mgr.load_project(grp_name)
-            loaded_projects[grp_name] = sessions
-            # 超出限制时删除最旧的
-            while len(loaded_projects) > MAX_CACHE_SIZE:
-                loaded_projects.popitem(last=False)
-
-        content_col.controls.clear()
-        if not sessions:
-            content_col.controls.append(ft.Text(L.get('history_no_records', '无记录'), color=ft.Colors.GREY_500))
-            state.page.update()
-            return
-
-        # 用第一个 session 的 cwd 更新标题
-        first_session = next(iter(sessions.values()), {})
-        real_path = first_session.get('cwd', '')
-        if real_path:
-            title_text.value = shorten_path(real_path, 40)
-            title_text.tooltip = real_path
-
-        # 更新统计
-        grp_size = sum(s.get('size', 0) for s in sessions.values())
-        total_msgs = sum(s.get('message_count', 0) for s in sessions.values())
-        tile.subtitle = ft.Text(f"{len(sessions)} {L['history_sessions']} | {total_msgs} {L.get('history_messages', '消息')} | {grp_size/1024:.1f}KB", size=11)
-
-        for sid, info in sorted(sessions.items(), key=lambda x: x[1].get('last_timestamp', ''), reverse=True):
-            ts = info.get('last_timestamp', '')
-            try:
-                time_str = datetime.fromisoformat(ts.replace('Z', '+00:00')).strftime('%m-%d %H:%M') if ts else L.get('unknown', '未知')
-            except (ValueError, AttributeError):
-                time_str = ts[:16] if ts else L.get('unknown', '未知')
-            size_str = f'{info.get("size", 0)/1024:.1f}KB'
-            turns = count_real_turns(info.get('messages', []))
-            item_data = {'group': grp_name, 'session_id': sid, 'info': info}
-            idx = len(all_session_items)
-            item = ft.Container(
-                content=ft.Column([ft.Text(f'{sid[:12]}...', size=13), ft.Text(f"{turns}轮 | {time_str} | {size_str}", size=11, color=ft.Colors.GREY_500)], spacing=2),
-                on_click=lambda e, i=idx, d=item_data: on_item_click(e, i, d),
-                padding=ft.padding.only(left=20, top=5, bottom=5, right=5), border_radius=4, expand=True,
-            )
-            all_session_items.append((item, item_data))
-            content_col.controls.append(ft.Row([item], expand=True))
-        state.page.update()
-
-    def refresh_history_tree(filter_text=''):
-        nonlocal last_clicked_idx, all_session_items
-        selected_sessions.clear()
-        all_session_items = []
-        loaded_projects.clear()
-        last_clicked_idx = -1
-        history_tree.controls.clear()
-        history_stats.value = ''
-
-        mgr = get_current_manager()
-        if current_cli in ('gemini', 'aider'):
-            history_tree.controls.append(ft.Text(f'{current_cli.title()} 历史记录暂不支持', color=ft.Colors.ORANGE))
-            state.page.update()
-            return
-        if not mgr:
-            history_tree.controls.append(ft.Text(f'{current_cli.title()} 目录不存在', color=ft.Colors.RED))
-            state.page.update()
-            return
-
-        # 显示进度条
-        history_progress.visible = True
-        history_progress.value = 0
-        state.page.update()
-
-        # 使用 with_cwd=True 获取项目列表和真实路径
-        projects_data = mgr.list_projects(with_cwd=True, limit=50) if hasattr(mgr, 'list_projects') else []
-        if not projects_data:
-            history_stats.value = L['history_no_records']
-            history_progress.visible = False
-            state.page.update()
-            return
-
-        history_stats.value = f"{L.get('history_projects', '项目')}: {len(projects_data)}"
-
-        # 构建 cwd_map: project_id -> real_cwd
-        cwd_map = {}
-        projects = []
-        for item in projects_data:
-            if isinstance(item, tuple):
-                project_id, real_cwd = item
-            else:
-                project_id = item
-                real_cwd = ''
-            projects.append(project_id)
-            cwd_map[project_id] = real_cwd or project_id
-
-        total = len(projects)
-        for i, grp_name in enumerate(projects):
-            # 更新进度
-            history_progress.value = (i + 1) / total
-            if i % 5 == 0:  # 每5个更新一次UI
-                state.page.update()
-
-            # 使用真实路径或项目名显示
-            display_path = cwd_map.get(grp_name, grp_name)
-            if filter_text and filter_text.lower() not in display_path.lower() and filter_text.lower() not in grp_name.lower():
-                continue
-            content_col = ft.Column([], spacing=2)
-            title_text = ft.Text(shorten_path(display_path, 40), size=14, weight=ft.FontWeight.W_500)
-            title_text.tooltip = display_path
-            folder_btn = ft.IconButton(ft.Icons.FOLDER_OPEN, icon_size=16, tooltip=title_text.tooltip)
-            def open_folder(e, txt=title_text):
-                import subprocess, sys
-                path = txt.tooltip or txt.value
-                if sys.platform == 'win32':
-                    subprocess.Popen(['explorer', path.replace('/', '\\')])
-                elif sys.platform == 'darwin':
-                    subprocess.Popen(['open', path])
-                else:
-                    subprocess.Popen(['xdg-open', path])
-            folder_btn.on_click = open_folder
-            tile = ft.ExpansionTile(
-                title=ft.Row([title_text, folder_btn], spacing=0),
-                subtitle=ft.Text(L.get('click_to_load', '点击加载...'), size=11, color=ft.Colors.GREY_500),
-                controls=[content_col],
-                initially_expanded=False,
-            )
-            # 展开时加载
-            def on_expand(e, g=grp_name, c=content_col, t=tile, txt=title_text):
-                if str(e.data).lower() == 'true' and not c.controls:
-                    load_project_content(g, c, t, txt)
-            tile.on_change = on_expand
-            history_tree.controls.append(tile)
-
-        # 隐藏进度条
-        history_progress.value = 1
-        history_progress.visible = False
-        state.page.update()
-
-    def copy_cb(t):
-        state.page.set_clipboard(t)
-        show_snackbar(state.page, L['history_copied'].format(t[:50]))
-
-    def extract_content(msg) -> tuple[str, str, list, bool]:
-        """提取消息内容，返回 (role, text, tool_blocks, is_real_user)
-        is_real_user: True表示真正的用户输入，False表示AI中间步骤(tool_result)
-        """
+    def extract_content(msg) -> tuple:
+        """提取消息内容"""
         if current_cli == 'claude':
             role = msg.get('type', '?')
             c = msg.get('message', {}).get('content', [])
         else:
             role = msg.get('role', '?')
             c = msg.get('content', '')
-
         if isinstance(c, str):
             return role, c, [], True
-
         texts, tool_blocks = [], []
         has_tool_result = False
         if isinstance(c, list):
@@ -235,14 +83,10 @@ def create_history_page(state):
                 elif btype == 'tool_result':
                     tool_blocks.append(block)
                     has_tool_result = True
-
-        # 用户消息：没有tool_result = 真正用户输入
-        # AI中间步骤：有tool_result = 假用户消息
         is_real_user = (role == 'user' and not has_tool_result)
         return role, '\n'.join(texts), tool_blocks, is_real_user
 
     def count_real_turns(messages):
-        """计算真实对话轮次"""
         turns = 0
         for msg in messages:
             role, _, _, is_real_user = extract_content(msg)
@@ -250,135 +94,140 @@ def create_history_page(state):
                 turns += 1
         return turns
 
-    # 工具图标和颜色映射
-    TOOL_ICONS = {
-        'Read': ('📖', '读取', ft.Colors.BLUE_400),
-        'Write': ('✏️', '写入', ft.Colors.GREEN_400),
-        'Edit': ('📝', '编辑', ft.Colors.ORANGE_400),
-        'Bash': ('💻', '命令', ft.Colors.PURPLE_400),
-        'Glob': ('🔍', '搜索文件', ft.Colors.TEAL_400),
-        'Grep': ('🔎', '搜索内容', ft.Colors.CYAN_400),
-        'Task': ('🚀', '子任务', ft.Colors.PINK_400),
-        'TodoWrite': ('📋', '待办', ft.Colors.AMBER_400),
-        'WebFetch': ('🌐', '网页', ft.Colors.INDIGO_400),
-        'WebSearch': ('🔍', '搜索', ft.Colors.LIGHT_BLUE_400),
-    }
+    # ==================== 左侧边栏 - 项目树 ====================
+    sidebar_container = ft.Container(width=320, visible=True)
+    project_list = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True, spacing=0)
 
-    def get_tool_detail(name, inp):
-        """获取工具调用的详细信息"""
-        if name == 'Read':
-            return inp.get('file_path', '')
-        elif name == 'Write':
-            return inp.get('file_path', '')
-        elif name == 'Edit':
-            return inp.get('file_path', '')
-        elif name == 'Bash':
-            return inp.get('command', '')[:80].replace('\n', ' ')
-        elif name in ('Glob', 'Grep'):
-            return inp.get('pattern', '')
-        elif name == 'Task':
-            return inp.get('description', '')
-        elif name == 'TodoWrite':
-            todos = inp.get('todos', [])
-            return ', '.join(t.get('content', '')[:15] for t in todos[:3])
-        elif name == 'WebFetch':
-            return inp.get('url', '')[:60]
-        elif name == 'WebSearch':
-            return inp.get('query', '')
-        return str(inp)[:50]
+    # 项目展开状态
+    expanded_projects = {}
+    selected_session_id = [None]
 
-    def render_edit_diff(inp):
-        """渲染 Edit 工具的 diff 内容"""
-        old = inp.get('old_string', '')[:500]
-        new = inp.get('new_string', '')[:500]
-        return ft.Column([
-            ft.Text("- 旧内容:", size=11, color=ft.Colors.RED_400, weight=ft.FontWeight.BOLD),
-            ft.Container(ft.Text(old, size=10, selectable=True), bgcolor=ft.Colors.RED_50, padding=6, border_radius=4),
-            ft.Text("+ 新内容:", size=11, color=ft.Colors.GREEN_400, weight=ft.FontWeight.BOLD),
-            ft.Container(ft.Text(new, size=10, selectable=True), bgcolor=ft.Colors.GREEN_50, padding=6, border_radius=4),
-        ], spacing=4)
+    def build_project_item(project_id, display_path):
+        """构建项目项 - 复刻 DEV 版 ProjectItem"""
+        is_expanded = expanded_projects.get(project_id, False)
+        sessions_col = ft.Column([], spacing=0, visible=is_expanded)
+        theme = state.get_theme()
 
-    def render_timeline_item(step_num, icon, label, detail, color, expanded_content=None):
-        """渲染时间线单个步骤"""
-        expand_state = {'open': False}
-        detail_col = ft.Column([], visible=False)
+        # 项目标题行
+        title_text = ft.Text(shorten_path(display_path, 35), size=13, weight=ft.FontWeight.W_500)
+        subtitle_text = ft.Text(L.get('click_to_load', '点击加载...') if not is_expanded else '', size=11, color=ft.Colors.GREY_500)
+        expand_icon = ft.Text('▼' if is_expanded else '▶', size=11, color=ft.Colors.GREY_500)
 
-        def toggle_expand(_):
-            if expanded_content:
-                expand_state['open'] = not expand_state['open']
-                detail_col.visible = expand_state['open']
-                if expand_state['open'] and not detail_col.controls:
-                    detail_col.controls.append(expanded_content)
-                state.page.update()
+        def on_project_click(_):
+            nonlocal is_expanded
+            expanded_projects[project_id] = not expanded_projects.get(project_id, False)
+            is_expanded = expanded_projects[project_id]
+            expand_icon.value = '▼' if is_expanded else '▶'
+            sessions_col.visible = is_expanded
 
-        return ft.Container(
-            ft.Column([
-                ft.Row([
-                    ft.Container(ft.Text(str(step_num), size=10, color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
-                                 width=20, height=20, bgcolor=color, border_radius=10, alignment=ft.alignment.center),
-                    ft.Text(f"{icon} {label}", size=12, weight=ft.FontWeight.W_500),
-                    ft.Text(shorten_path(detail, 50), size=11, color=ft.Colors.GREY_600, expand=True),
-                    ft.Icon(ft.Icons.EXPAND_MORE if expanded_content else None, size=16, color=ft.Colors.GREY_400),
-                ], spacing=8),
-                detail_col,
-            ], spacing=2),
-            padding=ft.padding.symmetric(vertical=4, horizontal=8),
-            border=ft.border.only(left=ft.BorderSide(2, color)),
-            margin=ft.margin.only(left=10, bottom=2),
-            on_click=toggle_expand if expanded_content else None,
-            ink=bool(expanded_content),
-        )
+            if is_expanded and not sessions_col.controls:
+                # 懒加载会话列表
+                load_sessions(project_id, sessions_col, subtitle_text)
+            state.page.update()
 
-    def simplify_user_msg(txt):
-        """简化用户消息，提取关键内容"""
-        import re
-        # 提取文件路径 (Windows/Unix)
-        paths = re.findall(r'[A-Za-z]:[\\\/][^\s\n\'"<>|*?]+|\/[\w\-\.\/]+', txt)
-        if paths:
-            return ' '.join(paths[:3])  # 最多3个路径
-        return txt[:200]
-
-    def render_user_msg(txt):
-        """渲染用户消息"""
-        display = simplify_user_msg(txt) if txt else '[空]'
-        return ft.Container(
-            ft.Row([
-                ft.Icon(ft.Icons.PERSON, size=18, color=ft.Colors.BLUE),
-                ft.Text(display, size=13, expand=True, tooltip=txt[:500] if len(txt) > 200 else None),
+        project_header = ft.Container(
+            content=ft.Row([
+                ft.Column([title_text, subtitle_text], spacing=2, expand=True),
+                ft.Text('📁', size=14, color=ft.Colors.AMBER),
+                expand_icon,
             ], spacing=8),
-            bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.BLUE),
-            padding=10, border_radius=8, margin=ft.margin.only(bottom=8),
+            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            bgcolor=theme['header_bg'] if is_expanded else None,
+            on_click=on_project_click,
+            ink=True,
         )
 
-    def render_ai_thinking(txt):
-        """渲染AI思考/回复文本"""
-        if not txt or not txt.strip():
-            return None
         return ft.Container(
-            ft.Row([
-                ft.Icon(ft.Icons.AUTO_AWESOME, size=16, color=ft.Colors.GREEN),
-                ft.Text(txt[:400], size=12, color=ft.Colors.GREY_800),
-            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.START),
-            padding=ft.padding.only(left=10, bottom=6),
+            content=ft.Column([project_header, sessions_col], spacing=0),
+            border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.with_opacity(0.1, ft.Colors.GREY))),
         )
 
-    def show_detail(d):
-        history_detail.controls.clear()
-        if not d: return
-        info, sid = d['info'], d['session_id']
+    def load_sessions(project_id, sessions_col, subtitle_text):
+        """加载项目的会话列表"""
+        if project_id in loaded_projects:
+            loaded_projects.move_to_end(project_id)
+            sessions = loaded_projects[project_id]
+        else:
+            mgr = get_current_manager()
+            if not mgr or not hasattr(mgr, 'load_project'):
+                return
+            sessions = mgr.load_project(project_id)
+            loaded_projects[project_id] = sessions
+            while len(loaded_projects) > MAX_CACHE_SIZE:
+                loaded_projects.popitem(last=False)
+
+        if not sessions:
+            sessions_col.controls.append(ft.Text(L.get('history_no_records', '无记录'), size=11, color=ft.Colors.GREY_500))
+            return
+
+        subtitle_text.value = f"{len(sessions)} {L.get('history_sessions', '会话')}"
+
+        for sid, info in sorted(sessions.items(), key=lambda x: x[1].get('last_timestamp', ''), reverse=True):
+            ts = info.get('last_timestamp', '')
+            try:
+                time_str = datetime.fromisoformat(ts.replace('Z', '+00:00')).strftime('%m-%d %H:%M') if ts else ''
+            except (ValueError, AttributeError):
+                time_str = ts[:16] if ts else ''
+            turns = count_real_turns(info.get('messages', []))
+
+            is_selected = selected_session_id[0] == sid
+            session_item = ft.Container(
+                content=ft.Column([
+                    ft.Text(time_str, size=11, color=ft.Colors.GREY_600),
+                    ft.Text(f"{turns} {L.get('history_turns', '轮')}", size=10, color=ft.Colors.GREY_500),
+                ], spacing=2),
+                padding=ft.padding.only(left=24, top=6, bottom=6, right=8),
+                border=ft.border.only(left=ft.BorderSide(2, ft.Colors.BLUE_500 if is_selected else ft.Colors.TRANSPARENT)),
+                bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.BLUE) if is_selected else None,
+                on_click=lambda e, s=sid, i=info, p=project_id: on_session_click(s, i, p),
+                ink=True,
+            )
+            sessions_col.controls.append(session_item)
+
+    def on_session_click(session_id, info, project_id):
+        """点击会话"""
+        selected_session_id[0] = session_id
+        selected_session_data[0] = {'session_id': session_id, 'info': info, 'group': project_id}
+        show_session_detail(info, session_id)
+        refresh_project_list()  # 刷新选中状态
+
+    # ==================== 右侧面板 - 会话详情 ====================
+    detail_panel = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True, spacing=8)
+    detail_header = ft.Row([], spacing=8, wrap=True)
+    tool_stats_row = ft.Row([], spacing=4, wrap=True)
+    messages_container = ft.Column([], spacing=8, expand=True)
+
+    # 分页状态
+    load_state = {'head': 3, 'tail': 3}
+
+    def toggle_sidebar(_):
+        """切换侧边栏显示"""
+        show_sidebar[0] = not show_sidebar[0]
+        sidebar_container.visible = show_sidebar[0]
+        toggle_btn.text = '← ' + L.get('collapse', '收起') if show_sidebar[0] else L.get('expand', '展开') + ' →'
+        state.page.update()
+
+    toggle_btn = ft.TextButton('← ' + L.get('collapse', '收起'), on_click=toggle_sidebar)
+
+    def show_session_detail(info, session_id):
+        """显示会话详情 - 复刻 DEV 版"""
         messages = info.get('messages', [])
+        cwd = info.get('cwd', '')
 
-        # 头部信息
-        history_detail.controls.append(ft.Text(L['history_session'].format(sid[:16]), size=14, weight=ft.FontWeight.BOLD))
-        history_detail.controls.append(ft.Text(L['history_path'].format(info.get('cwd', '?')), size=12, color=ft.Colors.GREY_600))
-        cmd = f'claude --resume {sid}' if current_cli == 'claude' else f'codex --resume {sid}'
-        history_detail.controls.append(ft.Row([ft.TextButton(L['history_copy_id'], on_click=lambda _: copy_cb(sid)), ft.TextButton(L['history_copy_resume'], on_click=lambda _: copy_cb(cmd))], spacing=5))
+        # 构建操作栏
+        detail_header.controls = [
+            toggle_btn,
+            ft.TextButton('📄 HTML', on_click=lambda _: export_session('html')),
+            ft.TextButton('📝 MD', on_click=lambda _: export_session('md')),
+            ft.TextButton('📂 ' + L.get('open_folder', '打开'), on_click=lambda _: open_folder(cwd)) if cwd else ft.Container(),
+            ft.TextButton('🗑️ ' + L.get('delete', '删除'), on_click=lambda _: del_session()),
+        ]
 
-        # 统计工具使用和真实对话轮次
+        # 统计工具使用
         tool_stats = {}
-        real_turns = 0  # 真实对话轮次
+        real_turns = 0
         for msg in messages:
-            role, txt, tool_blocks, is_real_user = extract_content(msg)
+            role, _, tool_blocks, is_real_user = extract_content(msg)
             if role == 'user' and is_real_user:
                 real_turns += 1
             for b in tool_blocks:
@@ -386,150 +235,216 @@ def create_history_page(state):
                     name = b.get('name', 'unknown')
                     tool_stats[name] = tool_stats.get(name, 0) + 1
 
-        # 显示真实对话轮次
-        history_detail.controls.append(ft.Text(f"{L.get('real_turns', '对话轮次')}: {real_turns}", size=12, color=ft.Colors.GREY_600))
+        # 工具统计芯片
+        tool_stats_row.controls = [
+            ft.Text(f"{real_turns} {L.get('history_turns', '轮')}", size=12, color=ft.Colors.GREY_600),
+        ]
+        for name, count in sorted(tool_stats.items(), key=lambda x: -x[1])[:6]:
+            icon, _, bgcolor = TOOL_ICONS.get(name, ('🔧', '', ft.Colors.GREY_100))
+            tool_stats_row.controls.append(ft.Container(
+                ft.Text(f"{icon} {name}: {count}", size=10),
+                bgcolor=bgcolor, padding=ft.padding.symmetric(horizontal=6, vertical=2), border_radius=8,
+            ))
 
-        if tool_stats:
-            stats_chips = [ft.Container(
-                ft.Text(f"{TOOL_ICONS.get(n, ('🔧', n, ft.Colors.GREY))[0]} {n}: {c}", size=11),
-                bgcolor=ft.Colors.with_opacity(0.1, TOOL_ICONS.get(n, ('', '', ft.Colors.GREY))[2]),
-                padding=ft.padding.symmetric(horizontal=8, vertical=4), border_radius=12,
-            ) for n, c in sorted(tool_stats.items(), key=lambda x: -x[1])[:8]]
-            history_detail.controls.append(ft.Row(stats_chips, wrap=True, spacing=4))
+        # 构建消息时间线
+        build_message_timeline(messages)
+        state.page.update()
 
-        history_detail.controls.append(ft.Divider())
+    def build_message_timeline(messages):
+        """构建消息时间线 - 复刻 DEV 版分页机制"""
+        messages_container.controls.clear()
 
-        # 头部控件数量：标题、路径、按钮、轮次、[工具统计]、分隔线
-        header_count = 6 if tool_stats else 5
-
-        # 将消息按"轮次"分组：一个真实用户消息 + 后续所有AI响应 = 一轮
-        rounds = []  # [(user_msg, [ai_msgs...])]
+        # 将消息按轮次分组
+        rounds = []
         current_round = None
-        orphan_ai_msgs = []  # 开头没有用户消息的AI响应
+        orphan_msgs = []
         for msg in messages:
-            role, txt, tool_blocks, is_real_user = extract_content(msg)
+            role, _, _, is_real_user = extract_content(msg)
             if role == 'user' and is_real_user:
-                # 真实用户消息开始新一轮
                 if current_round:
                     rounds.append(current_round)
                 current_round = (msg, [])
             elif current_round:
                 current_round[1].append(msg)
             else:
-                orphan_ai_msgs.append(msg)
+                orphan_msgs.append(msg)
         if current_round:
             rounds.append(current_round)
-        # 如果开头有孤立的AI消息，创建一个虚拟轮次
-        if orphan_ai_msgs and not rounds:
-            rounds.append((None, orphan_ai_msgs))
-        elif orphan_ai_msgs and rounds:
-            # 将孤立的AI消息添加到第一轮之前
-            rounds.insert(0, (None, orphan_ai_msgs))
+        if orphan_msgs:
+            rounds.insert(0, (None, orphan_msgs))
 
-        load_state = {'head': 1, 'tail': 1}  # 初始：首尾各1轮
+        total = len(rounds)
+        if total == 0:
+            messages_container.controls.append(ft.Text(L.get('history_no_records', '无记录'), color=ft.Colors.GREY_500))
+            return
 
-        def render_round(round_data, round_num):
-            """渲染一轮对话"""
-            user_msg, ai_msgs = round_data
-            controls = []
-            step = 0
-            # 用户消息（可能为None）
-            if user_msg:
-                _, txt, _, _ = extract_content(user_msg)
-                controls.append(render_user_msg(f"[轮{round_num}] {txt}"))
-            # AI响应
-            for msg in ai_msgs:
-                role, txt, tool_blocks, _ = extract_content(msg)
-                if role == 'assistant':
-                    thinking = render_ai_thinking(txt)
-                    if thinking:
-                        controls.append(thinking)
-                    for block in tool_blocks:
-                        if block.get('type') == 'tool_use':
-                            step += 1
-                            name = block.get('name', 'unknown')
-                            inp = block.get('input', {})
-                            icon, label, color = TOOL_ICONS.get(name, ('🔧', name, ft.Colors.GREY))
-                            detail = get_tool_detail(name, inp)
-                            # Edit 工具支持展开查看 diff
-                            expanded = render_edit_diff(inp) if name == 'Edit' else None
-                            controls.append(render_timeline_item(step, icon, label, detail, color, expanded))
-            return controls
+        head_n, tail_n = load_state['head'], load_state['tail']
 
-        def build_timeline():
-            del history_detail.controls[header_count:]
-            total = len(rounds)
-            if total == 0:
-                history_detail.controls.append(ft.Text(L.get('history_no_records', '无记录'), color=ft.Colors.GREY_500))
-                return
+        if head_n + tail_n >= total:
+            # 全部显示
+            for i, rd in enumerate(rounds):
+                messages_container.controls.extend(render_round(rd, i + 1))
+        else:
+            # 显示前 head_n 轮
+            for i in range(head_n):
+                messages_container.controls.extend(render_round(rounds[i], i + 1))
 
-            head_n, tail_n = load_state['head'], load_state['tail']
-            # 计算显示范围
-            if head_n + tail_n >= total:
-                # 全部显示
-                for i, rd in enumerate(rounds):
-                    history_detail.controls.extend(render_round(rd, i + 1))
-            else:
-                # 显示头部
-                for i in range(head_n):
-                    history_detail.controls.extend(render_round(rounds[i], i + 1))
-                # 展开按钮：向上/向下两个方向
-                hidden = total - head_n - tail_n
-                def expand_down(_):
-                    load_state['head'] += 3
-                    build_timeline()
-                    state.page.update()
-                def expand_up(_):
-                    load_state['tail'] += 3
-                    build_timeline()
-                    state.page.update()
-                history_detail.controls.append(ft.Container(
-                    ft.Row([
-                        ft.ElevatedButton("⬇ 向下 +3", on_click=expand_down, bgcolor=ft.Colors.BLUE_400, color=ft.Colors.WHITE),
-                        ft.Text(f"隐藏 {hidden} 轮", size=12, color=ft.Colors.GREY_600),
-                        ft.ElevatedButton("⬆ 向上 +3", on_click=expand_up, bgcolor=ft.Colors.BLUE_400, color=ft.Colors.WHITE),
-                    ], alignment=ft.MainAxisAlignment.CENTER, spacing=16),
-                    margin=ft.margin.symmetric(vertical=12),
-                ))
-                # 显示尾部
-                for i in range(total - tail_n, total):
-                    history_detail.controls.extend(render_round(rounds[i], i + 1))
+            # 展开按钮
+            hidden = total - head_n - tail_n
+            messages_container.controls.append(ft.Container(
+                ft.Row([
+                    ft.ElevatedButton(f"↓ +10", on_click=lambda _: expand_more('head', messages), bgcolor=ft.Colors.BLUE_500, color=ft.Colors.WHITE),
+                    ft.Text(f"{L.get('hidden', '隐藏')} {hidden} {L.get('history_turns', '轮')}", size=12, color=ft.Colors.GREY_500),
+                    ft.ElevatedButton(f"↑ +10", on_click=lambda _: expand_more('tail', messages), bgcolor=ft.Colors.BLUE_500, color=ft.Colors.WHITE),
+                ], alignment=ft.MainAxisAlignment.CENTER, spacing=16),
+                padding=ft.padding.symmetric(vertical=16),
+            ))
 
-        build_timeline()
+            # 显示后 tail_n 轮
+            for i in range(total - tail_n, total):
+                messages_container.controls.extend(render_round(rounds[i], i + 1))
+
+    def expand_more(direction, messages):
+        if direction == 'head':
+            load_state['head'] += 10
+        else:
+            load_state['tail'] += 10
+        build_message_timeline(messages)
         state.page.update()
 
-    def del_sessions(data):
-        mgr = get_current_manager()
-        if not data or not mgr: return
-        def do_del(e):
-            state.page.close(dlg)
-            cnt = 0
-            for d in data:
-                if mgr.delete_session(d['group'], d['session_id'], d['info']): cnt += 1
-                loaded_projects.pop(d['group'], None)  # 清除本地缓存
-            show_snackbar(state.page, L['history_moved'].format(cnt))
-            refresh_history_tree()
-        dlg = ft.AlertDialog(
-            title=ft.Text(L['confirm_delete']),
-            content=ft.Text(L['history_confirm_delete'].format(len(data), TRASH_RETENTION_DAYS)),
-            actions=[
-                ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg)),
-                ft.TextButton(L['delete'], on_click=do_del)
-            ]
+    def render_round(round_data, round_num):
+        """渲染一轮对话 - 复刻 DEV 版时间线样式"""
+        user_msg, ai_msgs = round_data
+        controls = []
+
+        # 用户消息
+        if user_msg:
+            _, txt, _, _ = extract_content(user_msg)
+            controls.append(render_timeline_message(txt, 'user', round_num))
+
+        # AI 响应
+        for msg in ai_msgs:
+            role, txt, tool_blocks, _ = extract_content(msg)
+            if role == 'assistant':
+                if txt and txt.strip():
+                    controls.append(render_timeline_message(txt, 'assistant'))
+                # 工具调用
+                for block in tool_blocks:
+                    if block.get('type') == 'tool_use':
+                        controls.append(render_tool_call(block))
+
+        return controls
+
+    def render_timeline_message(text, role, round_num=None):
+        """渲染时间线消息 - 复刻 DEV 版 TimelineMessageItem"""
+        is_user = role == 'user'
+        theme = state.get_theme()
+
+        # 颜色配置
+        avatar_bg = ft.Colors.BLUE_500 if is_user else ft.Colors.GREEN_500
+        bubble_bg = ft.Colors.with_opacity(0.06, ft.Colors.BLUE if is_user else ft.Colors.GREEN)
+        border_color = ft.Colors.BLUE_500 if is_user else ft.Colors.GREEN_500
+        line_color = ft.Colors.with_opacity(0.3, ft.Colors.BLUE if is_user else ft.Colors.GREEN)
+        label = 'User' if is_user else 'Assistant'
+
+        # 头像圆点
+        avatar = ft.Container(
+            ft.Text('👤' if is_user else '🤖', size=12),
+            width=28, height=28, border_radius=14,
+            bgcolor=avatar_bg, alignment=ft.alignment.center,
         )
-        state.page.open(dlg)
 
-    # 共享 FilePicker
-    file_picker = ft.FilePicker()
-    state.page.overlay.append(file_picker)
+        # 竖线连接
+        line = ft.Container(width=2, height=40, bgcolor=line_color)
 
-    def export_session(fmt='html'):
-        """导出选中会话"""
-        if not selected_sessions:
-            show_snackbar(state.page, L['no_selection'])
+        # 消息气泡
+        display_text = text[:500] if len(text) > 500 else text
+        prefix = f"[{L.get('round', '轮')}{round_num}] " if round_num else ""
+
+        bubble = ft.Container(
+            ft.Column([
+                ft.Container(
+                    ft.Text(label, size=10, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),
+                    bgcolor=avatar_bg, padding=ft.padding.symmetric(horizontal=8, vertical=2), border_radius=4,
+                ),
+                ft.Text(prefix + display_text, size=12, selectable=True),
+            ], spacing=6),
+            bgcolor=bubble_bg, padding=12, border_radius=8,
+            border=ft.border.only(left=ft.BorderSide(4, border_color)),
+            expand=True,
+        )
+
+        return ft.Row([
+            ft.Column([avatar, line], spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            bubble,
+        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
+
+    def render_tool_call(block):
+        """渲染工具调用 - 复刻 DEV 版 ToolCallItem"""
+        name = block.get('name', 'unknown')
+        inp = block.get('input', {})
+        icon, _, bgcolor = TOOL_ICONS.get(name, ('🔧', '', ft.Colors.GREY_100))
+
+        # 获取工具详情
+        detail = ''
+        if name in ('Read', 'Write', 'Edit'):
+            detail = inp.get('file_path', '')
+        elif name == 'Bash':
+            detail = inp.get('command', '')[:60]
+        elif name in ('Glob', 'Grep'):
+            detail = inp.get('pattern', '')
+        elif name == 'Task':
+            detail = inp.get('description', '')
+
+        expand_state = {'open': False}
+        detail_col = ft.Column([], visible=False)
+
+        def toggle_expand(_):
+            expand_state['open'] = not expand_state['open']
+            detail_col.visible = expand_state['open']
+            if expand_state['open'] and not detail_col.controls:
+                # 展开时显示详细内容
+                if name == 'Edit':
+                    old = inp.get('old_string', '')[:300]
+                    new = inp.get('new_string', '')[:300]
+                    detail_col.controls.append(ft.Column([
+                        ft.Text("- " + old, size=10, color=ft.Colors.RED_400),
+                        ft.Text("+ " + new, size=10, color=ft.Colors.GREEN_400),
+                    ], spacing=4))
+                else:
+                    detail_col.controls.append(ft.Text(str(inp)[:500], size=10, selectable=True))
+            state.page.update()
+
+        return ft.Container(
+            ft.Column([
+                ft.Row([
+                    ft.Text('▶' if not expand_state['open'] else '▼', size=10, color=ft.Colors.GREY_500),
+                    ft.Text(f"{icon} {name}", size=11, weight=ft.FontWeight.W_500),
+                    ft.Text(shorten_path(detail, 50), size=10, color=ft.Colors.GREY_600, expand=True),
+                ], spacing=8),
+                detail_col,
+            ], spacing=4),
+            bgcolor=bgcolor, padding=8, border_radius=6,
+            margin=ft.margin.only(left=40, bottom=4),
+            on_click=toggle_expand, ink=True,
+        )
+
+    # ==================== 辅助函数 ====================
+    def open_folder(path):
+        import subprocess, sys
+        if sys.platform == 'win32':
+            subprocess.Popen(['explorer', path.replace('/', '\\')])
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', path])
+        else:
+            subprocess.Popen(['xdg-open', path])
+
+    def export_session(fmt):
+        if not selected_session_data[0]:
+            show_snackbar(state.page, L.get('no_selection', '请先选择会话'))
             return
         from core.session_export import export_session_html, export_session_md
-        data = list(selected_sessions.values())[0]
+        data = selected_session_data[0]
         sid = data['session_id'][:12]
         def on_result(result):
             if result.path:
@@ -538,28 +453,90 @@ def create_history_page(state):
                         export_session_html(data, result.path)
                     else:
                         export_session_md(data, result.path)
-                    show_snackbar(state.page, L.get('export_success', '导出成功: {}').format(result.path))
+                    show_snackbar(state.page, L.get('export_success', '导出成功'))
                 except Exception as ex:
                     show_snackbar(state.page, str(ex))
         file_picker.on_result = on_result
         file_picker.save_file(file_name=f'session_{sid}.{fmt}', allowed_extensions=[fmt])
 
-    def export_batch(e):
-        """批量导出所有会话"""
-        from core.session_export import export_sessions_batch
-        all_data = [d for _, d in all_session_items]
-        if not all_data:
-            show_snackbar(state.page, L['history_no_records'])
+    def del_session():
+        if not selected_session_data[0]:
             return
-        def on_result(result):
-            if result.path:
-                cnt = export_sessions_batch(all_data, result.path, 'html')
-                show_snackbar(state.page, L.get('export_batch_success', '批量导出 {} 个会话到 {}').format(cnt, result.path))
-        file_picker.on_result = on_result
-        file_picker.get_directory_path()
+        data = selected_session_data[0]
+        mgr = get_current_manager()
+        if mgr and hasattr(mgr, 'delete_session'):
+            mgr.delete_session(data['group'], data['session_id'], data['info'])
+            loaded_projects.pop(data['group'], None)
+            show_snackbar(state.page, L.get('history_moved', '已移至回收站'))
+            refresh_project_list()
 
-    def show_trash_dialog(e):
-        """显示回收站对话框"""
+    # 共享 FilePicker
+    file_picker = ft.FilePicker()
+    state.page.overlay.append(file_picker)
+
+    # ==================== 刷新函数 ====================
+    def refresh_project_list(filter_text=''):
+        project_list.controls.clear()
+        expanded_projects.clear()
+        loaded_projects.clear()
+
+        mgr = get_current_manager()
+        if current_cli in ('gemini', 'aider'):
+            project_list.controls.append(ft.Text(f'{current_cli.title()} 暂不支持', color=ft.Colors.ORANGE))
+            state.page.update()
+            return
+        if not mgr:
+            project_list.controls.append(ft.Text(f'{current_cli.title()} 目录不存在', color=ft.Colors.RED))
+            state.page.update()
+            return
+
+        projects_data = mgr.list_projects(with_cwd=True, limit=50) if hasattr(mgr, 'list_projects') else []
+        if not projects_data:
+            project_list.controls.append(ft.Text(L.get('history_no_records', '无记录'), color=ft.Colors.GREY_500))
+            state.page.update()
+            return
+
+        stats_text.value = f"{len(projects_data)} {L.get('history_projects', '项目')}"
+
+        for item in projects_data:
+            if isinstance(item, tuple):
+                project_id, real_cwd = item
+            else:
+                project_id, real_cwd = item, ''
+            display_path = real_cwd or project_id
+            if filter_text and filter_text.lower() not in display_path.lower():
+                continue
+            project_list.controls.append(build_project_item(project_id, display_path))
+
+        state.page.update()
+
+    # ==================== 顶部控件 ====================
+    cli_dropdown = ft.Dropdown(
+        value=current_cli,
+        options=[ft.dropdown.Option('claude', 'Claude'), ft.dropdown.Option('codex', 'Codex')],
+        width=120,
+    )
+
+    def on_cli_change(_):
+        nonlocal current_cli
+        nc = cli_dropdown.value or 'claude'
+        if nc != current_cli:
+            current_cli = nc
+            load_state['head'], load_state['tail'] = 3, 3
+            messages_container.controls.clear()
+            detail_header.controls.clear()
+            tool_stats_row.controls.clear()
+        refresh_project_list(search_field.value or '')
+
+    cli_dropdown.on_change = on_cli_change
+
+    search_field = ft.TextField(hint_text=L.get('history_search', '搜索'), width=200, prefix_icon=ft.Icons.SEARCH)
+    search_field.on_submit = lambda e: refresh_project_list(e.control.value or '')
+
+    stats_text = ft.Text('', size=12, color=ft.Colors.GREY_600)
+
+    def show_trash(_):
+        """显示回收站"""
         import time
         from ..common import save_settings
         mgr = get_current_manager()
@@ -570,110 +547,96 @@ def create_history_page(state):
         now = time.time()
         trash_list = ft.ListView(expand=True, spacing=2)
         selected_trash = set()
-        retention_days = state.settings.get('trash_retention_days', TRASH_RETENTION_DAYS)
 
-        retention_field = ft.TextField(value=str(retention_days), width=50, text_size=12, content_padding=5)
-        def save_retention(_):
-            try:
-                days = int(retention_field.value)
-                if 1 <= days <= 365:
-                    state.settings['trash_retention_days'] = days
-                    save_settings(state.settings)
-                    show_snackbar(state.page, L.get('saved', '已保存'))
-            except ValueError:
-                pass
-
-        def build_trash_list():
+        def build_list():
             trash_list.controls.clear()
-            days_setting = state.settings.get('trash_retention_days', TRASH_RETENTION_DAYS)
             for i, item in enumerate(items):
                 deleted_at = datetime.fromtimestamp(item['deleted_at'])
-                days_left = max(0, days_setting - (now - item['deleted_at']) / 86400)
+                days_left = max(0, TRASH_RETENTION_DAYS - (now - item['deleted_at']) / 86400)
                 is_sel = i in selected_trash
                 tile = ft.Container(
-                    content=ft.Row([
-                        ft.Checkbox(value=is_sel, on_change=lambda e, idx=i: toggle_trash(idx, e.control.value)),
+                    ft.Row([
+                        ft.Checkbox(value=is_sel, on_change=lambda e, idx=i: toggle(idx, e.control.value)),
                         ft.Column([
                             ft.Text(f"{item['session_id'][:12]}...", weight=ft.FontWeight.BOLD if is_sel else None),
-                            ft.Text(f"{item['project_name'][:20]} | {deleted_at.strftime('%m-%d %H:%M')} | {days_left:.1f}天", size=11, color=ft.Colors.GREY_600),
+                            ft.Text(f"{deleted_at.strftime('%m-%d %H:%M')} | {days_left:.0f}天", size=11, color=ft.Colors.GREY_500),
                         ], spacing=2, expand=True),
-                    ], spacing=10),
+                    ], spacing=8),
                     padding=8, bgcolor=ft.Colors.RED_50 if is_sel else None, border_radius=4,
                 )
                 trash_list.controls.append(tile)
             state.page.update()
 
-        def toggle_trash(idx, checked):
-            if checked: selected_trash.add(idx)
-            else: selected_trash.discard(idx)
-            build_trash_list()
+        def toggle(idx, checked):
+            if checked:
+                selected_trash.add(idx)
+            else:
+                selected_trash.discard(idx)
+            build_list()
 
-        def restore_selected(_):
-            cnt = 0
+        def restore(_):
             for idx in selected_trash:
-                if mgr.trash_manager.restore_from_trash(items[idx]): cnt += 1
+                mgr.trash_manager.restore_from_trash(items[idx])
             state.page.close(dlg)
-            show_snackbar(state.page, L.get('history_restored', '已恢复 {} 个会话').format(cnt))
-            refresh_history_tree()
+            refresh_project_list()
 
         def perm_delete(_):
             for idx in selected_trash:
                 mgr.trash_manager.permanently_delete(items[idx])
             state.page.close(dlg)
-            show_snackbar(state.page, L.get('history_perm_deleted', '已永久删除'))
 
-        def clear_trash(_):
-            for item in items:
-                mgr.trash_manager.permanently_delete(item)
-            state.page.close(dlg)
-            show_snackbar(state.page, L.get('history_trash_cleared', '回收站已清空'))
-
-        build_trash_list()
+        build_list()
         dlg = ft.AlertDialog(
             title=ft.Text(L.get('history_trash', '回收站')),
-            content=ft.Container(
-                ft.Column([
-                    ft.Row([ft.Text(L.get('trash_retention', '清理周期'), size=12), retention_field, ft.Text(L.get('days', '天'), size=12), ft.TextButton(L.get('save', '保存'), on_click=save_retention)], spacing=5),
-                    trash_list
-                ], expand=True),
-                width=500, height=350
-            ),
+            content=ft.Container(trash_list, width=400, height=300),
             actions=[
-                ft.TextButton(L.get('history_restore', '恢复'), on_click=restore_selected),
+                ft.TextButton(L.get('history_restore', '恢复'), on_click=restore),
                 ft.TextButton(L.get('history_perm_delete', '永久删除'), on_click=perm_delete),
-                ft.TextButton(L.get('history_clear_trash', '清空回收站'), on_click=clear_trash),
-                ft.TextButton(L['cancel'], on_click=lambda _: state.page.close(dlg)),
+                ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: state.page.close(dlg)),
             ],
         )
         state.page.open(dlg)
 
-    batch_delete_btn = ft.TextButton(L['history_delete_selected'], visible=False, on_click=lambda _: del_sessions(list(selected_sessions.values())))
-    batch_count_text = ft.Text('', size=12)
+    # ==================== 构建页面布局 ====================
+    # 左侧边栏
+    sidebar_container.content = ft.Container(
+        project_list,
+        border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY)),
+        border_radius=8, padding=0,
+    )
 
-    def update_btns():
-        batch_delete_btn.visible = len(selected_sessions) > 0
-        batch_count_text.value = L['history_selected_count'].format(len(selected_sessions)) if selected_sessions else ''
+    # 右侧详情面板
+    detail_panel.controls = [
+        detail_header,
+        tool_stats_row,
+        ft.Divider(height=1),
+        messages_container,
+    ]
 
-    cli_dropdown = ft.Dropdown(value=current_cli, options=[ft.dropdown.Option('claude', 'Claude'), ft.dropdown.Option('codex', 'Codex'), ft.dropdown.Option('gemini', 'Gemini'), ft.dropdown.Option('aider', 'Aider')], width=120)
-    def on_cli_change(_):
-        nonlocal current_cli
-        nc = cli_dropdown.value or 'claude'
-        if nc != current_cli:
-            current_cli = nc
-            history_detail.controls.clear()
-        refresh_history_tree(history_search.value or '')
-    cli_dropdown.on_change = on_cli_change
-    history_search.on_submit = lambda e: refresh_history_tree(e.control.value or '')
+    right_panel = ft.Container(
+        detail_panel,
+        expand=True,
+        border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY)),
+        border_radius=8, padding=12,
+    )
 
+    # 主布局
     history_page = ft.Column([
-        ft.Row([ft.Text(L['history'], size=20, weight=ft.FontWeight.BOLD), cli_dropdown, history_search, ft.TextButton(L.get('refresh', '刷新'), on_click=on_cli_change), batch_count_text, batch_delete_btn,
-                ft.TextButton(L.get('export_html', '导出HTML'), on_click=lambda _: export_session('html')),
-                ft.TextButton(L.get('export_md', '导出MD'), on_click=lambda _: export_session('md')),
-                ft.TextButton(L.get('export_batch', '批量导出'), on_click=export_batch),
-                ft.TextButton(L.get('history_trash', '回收站'), icon=ft.Icons.DELETE_OUTLINE, on_click=show_trash_dialog),
-                history_progress], wrap=True),
-        history_stats,
-        ft.Row([ft.Container(history_tree, expand=2, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10), ft.Container(history_detail, expand=3, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8, padding=10)], expand=True),
-    ], expand=True, spacing=10)
+        # 标题栏
+        ft.Row([
+            ft.Text(L.get('history', '历史记录'), size=18, weight=ft.FontWeight.BOLD),
+            cli_dropdown,
+            search_field,
+            ft.TextButton(L.get('refresh', '刷新'), icon=ft.Icons.REFRESH, on_click=lambda _: refresh_project_list()),
+            stats_text,
+            ft.Container(expand=True),
+            ft.TextButton(L.get('history_trash', '回收站'), icon=ft.Icons.DELETE_OUTLINE, on_click=show_trash),
+        ], spacing=12),
+        # 主内容区
+        ft.Row([
+            sidebar_container,
+            right_panel,
+        ], expand=True, spacing=12),
+    ], expand=True, spacing=12)
 
-    return history_page, refresh_history_tree
+    return history_page, refresh_project_list

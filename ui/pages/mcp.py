@@ -20,6 +20,8 @@ def create_mcp_page(state):
     expanded_mcp_categories = {}
     selected_mcp = None
     mcp_fetch_log = []
+    # 控件引用缓存，用于增量更新
+    _mcp_item_refs = {}  # idx -> {'container': Container, 'name_text': Text, 'icon': Icon}
 
     # 共享 FilePicker
     file_picker = ft.FilePicker()
@@ -69,6 +71,7 @@ def create_mcp_page(state):
 
     def refresh_mcp_tree():
         mcp_tree.controls.clear()
+        _mcp_item_refs.clear()
         tree = build_mcp_tree()
         theme = state.get_theme()
         for cat, items in tree.items():
@@ -91,16 +94,18 @@ def create_mcp_page(state):
                         continue
                     is_selected = selected_mcp == i
                     is_default = m.get('is_default', False)
+                    name_text = ft.Text(m.get('name', 'Unnamed'),
+                                       weight=ft.FontWeight.BOLD if is_selected else None,
+                                       color=ft.Colors.BLUE if is_selected else None)
+                    icon = ft.Icon(ft.Icons.STAR if is_default else ft.Icons.EXTENSION, size=16,
+                                  color=ft.Colors.ORANGE if is_default else (ft.Colors.BLUE if is_selected else ft.Colors.GREY_600))
                     item = ft.Container(
                         content=ft.Row([
                             ft.Checkbox(value=is_default, on_change=lambda e, idx=i: toggle_mcp_default(idx, e.control.value),
                                        tooltip=L['mcp_set_default_hint']),
-                            ft.Icon(ft.Icons.STAR if is_default else ft.Icons.EXTENSION, size=16,
-                                   color=ft.Colors.ORANGE if is_default else (ft.Colors.BLUE if is_selected else ft.Colors.GREY_600)),
+                            icon,
                             ft.Column([
-                                ft.Text(m.get('name', 'Unnamed'),
-                                       weight=ft.FontWeight.BOLD if is_selected else None,
-                                       color=ft.Colors.BLUE if is_selected else None),
+                                name_text,
                                 ft.Text(f"{m.get('command', '')} {m.get('args', '')}", size=10, color=ft.Colors.GREY_500),
                             ], spacing=0, expand=True),
                         ], spacing=5),
@@ -108,6 +113,7 @@ def create_mcp_page(state):
                         on_click=lambda e, idx=i: select_mcp(idx),
                         bgcolor=ft.Colors.BLUE_50 if is_selected else None, border_radius=4,
                     )
+                    _mcp_item_refs[i] = {'container': item, 'name_text': name_text, 'icon': icon}
                     mcp_tree.controls.append(item)
         state.page.update()
 
@@ -117,8 +123,24 @@ def create_mcp_page(state):
 
     def select_mcp(idx):
         nonlocal selected_mcp
+        old_selected = selected_mcp
         selected_mcp = idx
-        refresh_mcp_tree()
+        # 增量更新：只更新旧选中项和新选中项的样式
+        if old_selected is not None and old_selected in _mcp_item_refs:
+            ref = _mcp_item_refs[old_selected]
+            ref['container'].bgcolor = None
+            ref['name_text'].weight = None
+            ref['name_text'].color = None
+            is_default = state.mcp_list[old_selected].get('is_default', False)
+            ref['icon'].color = ft.Colors.ORANGE if is_default else ft.Colors.GREY_600
+        if idx is not None and idx in _mcp_item_refs:
+            ref = _mcp_item_refs[idx]
+            ref['container'].bgcolor = ft.Colors.BLUE_50
+            ref['name_text'].weight = ft.FontWeight.BOLD
+            ref['name_text'].color = ft.Colors.BLUE
+            is_default = state.mcp_list[idx].get('is_default', False)
+            ref['icon'].color = ft.Colors.ORANGE if is_default else ft.Colors.BLUE
+        state.page.update()
 
     def add_mcp(e):
         show_mcp_dialog(None)
@@ -531,9 +553,12 @@ def create_mcp_page(state):
         result_list = ft.ListView(expand=True, spacing=2)
         selected_items = set()
         selected_count_text = ft.Text(L['mcp_selected'].format(0), color=ft.Colors.GREY_600)
+        # 缓存控件引用，用于增量更新
+        _item_refs = {}  # name -> {'tile': Container, 'name_text': Text}
 
         def filter_list(e=None):
             result_list.controls.clear()
+            _item_refs.clear()
             keyword = search_field.value or ''
             cat_val = category_dropdown.value or L['mcp_all']
             cat_filter = display_to_zh.get(cat_val, '全部') if cat_val != L['mcp_all'] else '全部'
@@ -545,12 +570,13 @@ def create_mcp_page(state):
                 cat_disp = zh_to_display.get(cat, cat)
                 source = item.get('source', '')
                 is_selected = name in selected_items
+                name_text = ft.Text(name, weight=ft.FontWeight.BOLD if is_selected else None, expand=True)
                 tile = ft.Container(
                     content=ft.Row([
                         ft.Checkbox(value=is_selected, on_change=lambda e, n=name: toggle_select(n, e.control.value)),
                         ft.Column([
                             ft.Row([
-                                ft.Text(name, weight=ft.FontWeight.BOLD if is_selected else None, expand=True),
+                                name_text,
                                 ft.Container(ft.Text(cat_disp, size=10, color=ft.Colors.WHITE), bgcolor=ft.Colors.BLUE_400, padding=ft.padding.symmetric(2, 6), border_radius=8),
                                 ft.Text(source, size=9, color=ft.Colors.GREY_400),
                             ], spacing=5),
@@ -559,6 +585,7 @@ def create_mcp_page(state):
                     ], spacing=10),
                     padding=8, bgcolor=ft.Colors.BLUE_50 if is_selected else None, border_radius=4,
                 )
+                _item_refs[name] = {'tile': tile, 'name_text': name_text}
                 result_list.controls.append(tile)
             if len(servers) >= 200:
                 result_list.controls.append(ft.Text(L['mcp_more_hint'], color=ft.Colors.GREY_500, italic=True))
@@ -570,7 +597,12 @@ def create_mcp_page(state):
             else:
                 selected_items.discard(name)
             selected_count_text.value = L['mcp_selected'].format(len(selected_items))
-            filter_list()
+            # 只更新该项的样式，不重建列表
+            if name in _item_refs:
+                ref = _item_refs[name]
+                ref['tile'].bgcolor = ft.Colors.BLUE_50 if checked else None
+                ref['name_text'].weight = ft.FontWeight.BOLD if checked else None
+                state.page.update()
 
         def add_selected(e):
             added = 0

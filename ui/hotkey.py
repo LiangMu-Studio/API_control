@@ -215,12 +215,42 @@ def _restore_cursor():
 
 
 def setup_copypath_hotkey(hotkey: str = None, page=None):
-    """注册复制路径全局快捷键"""
+    """注册复制路径全局快捷键 - 完全复刻测试文件逻辑"""
     global _current_copypath_hotkey, _grab_mode, _esc_hook, _prev_selected, _old_title
     if not HAS_KEYBOARD:
         return
 
     hotkey = hotkey or load_hotkey("copy_path")
+
+    def get_selected_files():
+        """获取当前选中的文件（局部函数，确保 COM 正确初始化）"""
+        pythoncom.CoInitialize()
+        try:
+            selected = []
+            shell = win32com.client.Dispatch("Shell.Application")
+            windows = shell.Windows()
+            for i in range(windows.Count):
+                try:
+                    window = windows.Item(i)
+                    if window and window.Document:
+                        sel = window.Document.SelectedItems()
+                        if sel.Count > 0:
+                            for j in range(sel.Count):
+                                selected.append(sel.Item(j).Path)
+                except Exception:
+                    pass
+            return selected
+        finally:
+            pythoncom.CoUninitialize()
+
+    def is_explorer_or_desktop():
+        """检查前台窗口是否是资源管理器或桌面"""
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            class_name = win32gui.GetClassName(hwnd)
+            return class_name in ("CabinetWClass", "ExploreWClass", "Progman", "WorkerW")
+        except Exception:
+            return False
 
     def cancel_grab():
         global _grab_mode, _esc_hook, _old_title
@@ -248,15 +278,9 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
         if _esc_hook:
             keyboard.unhook(_esc_hook)
             _esc_hook = None
-        # 恢复窗口标题
-        if page and _old_title:
-            try:
-                page.title = _old_title
-                page.update()
-            except Exception:
-                pass
-        # 直接获取选中文件并复制
-        selected = _get_selected_files()
+
+        # 获取选中文件并复制
+        selected = get_selected_files()
         if selected:
             all_files = []
             for p in selected:
@@ -264,11 +288,21 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
             if all_files:
                 text = ",".join(all_files)
                 if _set_clipboard(text):
-                    # 显示提示框（不恢复软件窗口）
+                    # 显示提示框
                     paths = "\n".join(all_files[:10])
                     if len(all_files) > 10:
                         paths += f"\n... 等 {len(all_files)} 个文件"
                     _show_toast("复制成功", f"已复制 {len(all_files)} 个文件:\n{paths}")
+
+        # 恢复窗口
+        if page:
+            try:
+                if _old_title:
+                    page.title = _old_title
+                page.window.minimized = False
+                page.update()
+            except Exception:
+                pass
 
     def on_left_click():
         """左键点击后检查是否新选中了文件"""
@@ -277,7 +311,7 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
             return
 
         # 立即检查点击时的前台窗口（点击前的状态）
-        was_explorer = _is_explorer_or_desktop()
+        was_explorer = is_explorer_or_desktop()
 
         # 如果 Shift/Ctrl 按住，等待释放（多选操作）
         while keyboard.is_pressed("shift") or keyboard.is_pressed("ctrl"):
@@ -285,12 +319,12 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
         time.sleep(0.15)
 
         # 再次检查当前前台窗口
-        is_explorer_now = _is_explorer_or_desktop()
+        is_explorer_now = is_explorer_or_desktop()
 
         if not is_explorer_now:
             return
 
-        selected = set(_get_selected_files())
+        selected = set(get_selected_files())
         new_selected = selected - _prev_selected
 
         # 如果点击前就在资源管理器，有选中就复制（用户明确点击）
@@ -307,7 +341,7 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
 
         if not _grab_mode:
             _grab_mode = True
-            _prev_selected = set(_get_selected_files())  # 记录当前已选中的文件
+            _prev_selected = set(get_selected_files())  # 记录当前已选中的文件
             _set_grab_cursor()
             if page:
                 try:

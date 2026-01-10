@@ -19,7 +19,8 @@ try:
     import pythoncom
     import win32com.client
     HAS_KEYBOARD = True
-except ImportError:
+except ImportError as e:
+    print(f"[Hotkey] 模块导入失败: {e}")
     HAS_KEYBOARD = False
 
 CONFIG_PATH = Path(__file__).parent.parent / "data" / "hotkey.json"
@@ -218,9 +219,11 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
     """注册复制路径全局快捷键 - 完全复刻测试文件逻辑"""
     global _current_copypath_hotkey, _grab_mode, _esc_hook, _prev_selected, _old_title
     if not HAS_KEYBOARD:
+        print("[CopyPath] keyboard 模块未安装")
         return
 
     hotkey = hotkey or load_hotkey("copy_path")
+    print(f"[CopyPath] 注册快捷键: {hotkey}")
 
     def get_selected_files():
         """获取当前选中的文件（局部函数，确保 COM 正确初始化）"""
@@ -229,6 +232,7 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
             selected = []
             shell = win32com.client.Dispatch("Shell.Application")
             windows = shell.Windows()
+            print(f"[CopyPath] Windows count: {windows.Count}")
             for i in range(windows.Count):
                 try:
                     window = windows.Item(i)
@@ -237,8 +241,9 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                         if sel.Count > 0:
                             for j in range(sel.Count):
                                 selected.append(sel.Item(j).Path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[CopyPath] Window {i} error: {e}")
+            print(f"[CopyPath] Selected files: {selected}")
             return selected
         finally:
             pythoncom.CoUninitialize()
@@ -248,12 +253,15 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
         try:
             hwnd = win32gui.GetForegroundWindow()
             class_name = win32gui.GetClassName(hwnd)
+            print(f"[CopyPath] 前台窗口类名: {class_name}")
             return class_name in ("CabinetWClass", "ExploreWClass", "Progman", "WorkerW")
-        except Exception:
+        except Exception as e:
+            print(f"[CopyPath] is_explorer_or_desktop error: {e}")
             return False
 
     def cancel_grab():
         global _grab_mode, _esc_hook, _old_title
+        print(f"[CopyPath] cancel_grab called, _grab_mode={_grab_mode}")
         if _grab_mode:
             _grab_mode = False
             _restore_cursor()
@@ -267,11 +275,12 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                         page.title = _old_title
                     page.window.minimized = False  # 恢复窗口
                     page.update()
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[CopyPath] cancel_grab page error: {e}")
 
     def do_copy():
         global _grab_mode, _esc_hook, _old_title
+        print("[CopyPath] do_copy called")
         _grab_mode = False
         _restore_cursor()
         mouse.unhook_all()
@@ -281,18 +290,25 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
 
         # 获取选中文件并复制
         selected = get_selected_files()
+        print(f"[CopyPath] do_copy selected: {selected}")
         if selected:
             all_files = []
             for p in selected:
                 all_files.extend(_get_all_files(Path(p)))
+            print(f"[CopyPath] all_files count: {len(all_files)}")
             if all_files:
                 text = ",".join(all_files)
                 if _set_clipboard(text):
+                    print(f"[CopyPath] 复制成功: {len(all_files)} 个文件")
                     # 显示提示框
                     paths = "\n".join(all_files[:10])
                     if len(all_files) > 10:
                         paths += f"\n... 等 {len(all_files)} 个文件"
                     _show_toast("复制成功", f"已复制 {len(all_files)} 个文件:\n{paths}")
+                else:
+                    print("[CopyPath] 剪贴板写入失败")
+        else:
+            print("[CopyPath] 无选中文件")
 
         # 恢复窗口
         if page:
@@ -301,12 +317,13 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                     page.title = _old_title
                 page.window.minimized = False
                 page.update()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[CopyPath] do_copy page error: {e}")
 
     def on_left_click():
         """左键点击后检查是否新选中了文件"""
         global _grab_mode, _prev_selected
+        print(f"[CopyPath] on_left_click called, _grab_mode={_grab_mode}")
         if not _grab_mode:
             return
 
@@ -322,26 +339,36 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
         is_explorer_now = is_explorer_or_desktop()
 
         if not is_explorer_now:
+            print("[CopyPath] 当前不是资源管理器/桌面，忽略")
             return
 
         selected = set(get_selected_files())
         new_selected = selected - _prev_selected
+        print(f"[CopyPath] was_explorer={was_explorer}, prev={len(_prev_selected)}, now={len(selected)}, new={len(new_selected)}")
 
         # 如果点击前就在资源管理器，有选中就复制（用户明确点击）
         # 如果是从其他窗口切换过来，只有新选中才复制
         if was_explorer:
             if selected:
+                print("[CopyPath] 触发复制 (was_explorer)")
                 threading.Thread(target=do_copy, daemon=True).start()
+            else:
+                print("[CopyPath] 无选中，不复制")
         else:
             if new_selected:
+                print("[CopyPath] 触发复制 (new_selected)")
                 threading.Thread(target=do_copy, daemon=True).start()
+            else:
+                print("[CopyPath] 无新选中，不复制")
 
     def on_hotkey():
         global _grab_mode, _esc_hook, _prev_selected, _old_title
+        print(f"[CopyPath] on_hotkey called, _grab_mode={_grab_mode}")
 
         if not _grab_mode:
             _grab_mode = True
             _prev_selected = set(get_selected_files())  # 记录当前已选中的文件
+            print(f"[CopyPath] 记录已选中文件: {len(_prev_selected)} 个")
             _set_grab_cursor()
             if page:
                 try:
@@ -350,16 +377,18 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                     page.title = LANG[lang].get('pick_path_in_progress', '复制路径中...')
                     page.window.minimized = True
                     page.update()
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[CopyPath] on_hotkey page error: {e}")
             # 延迟注册监听，避免误触发
             def setup_hooks():
                 time.sleep(0.3)
+                print(f"[CopyPath] setup_hooks, _grab_mode={_grab_mode}")
                 if _grab_mode:
                     mouse.on_click(on_left_click)
                     mouse.on_right_click(lambda: cancel_grab())
                     global _esc_hook
                     _esc_hook = keyboard.on_press_key("escape", lambda _: cancel_grab())
+                    print("[CopyPath] 钩子注册完成")
             threading.Thread(target=setup_hooks, daemon=True).start()
 
     with _lock:
@@ -371,6 +400,7 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
 
         keyboard.add_hotkey(hotkey, on_hotkey)
         _current_copypath_hotkey = hotkey
+        print(f"[CopyPath] 快捷键注册完成: {hotkey}")
 
 
 def update_hotkey(new_hotkey: str, save_dir: str = None, page=None):

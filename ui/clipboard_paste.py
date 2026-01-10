@@ -214,19 +214,18 @@ def setup_clipboard_paste(page):
     for control in page.controls:
         _scan_and_wrap(control)
 
-    # 使用低级钩子检测 Win+V（keyboard 库对系统快捷键不可靠）
-    def _keyboard_hook(event):
-        if event.event_type == 'down' and event.name == 'v':
-            if keyboard.is_pressed('win') or keyboard.is_pressed('left windows') or keyboard.is_pressed('right windows'):
-                threading.Thread(target=_on_winv, daemon=True).start()
-    _state['keyboard_hook'] = keyboard.hook(_keyboard_hook)
+    # 使用 add_hotkey 检测 Win+V（避免 hook 干扰其他快捷键）
+    def _on_winv_hotkey():
+        threading.Thread(target=_on_winv, daemon=True).start()
+    keyboard.add_hotkey('win+v', _on_winv_hotkey)
+    _state['keyboard_hook'] = 'win+v'  # 保存用于清理
 
 
 def cleanup_clipboard_paste():
     """清理键盘钩子"""
     if _state.get('keyboard_hook'):
         try:
-            keyboard.unhook(_state['keyboard_hook'])
+            keyboard.remove_hotkey(_state['keyboard_hook'])
         except Exception:
             pass
         _state['keyboard_hook'] = None

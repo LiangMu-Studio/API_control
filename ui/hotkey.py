@@ -235,6 +235,7 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                 try:
                     if _old_title:
                         page.title = _old_title
+                    page.window.minimized = False  # 恢复窗口
                     page.update()
                 except Exception:
                     pass

@@ -16,6 +16,8 @@ pub struct Project {
     pub last_modified: f64,
     #[pyo3(get)]
     pub session_count: usize,
+    #[pyo3(get)]
+    pub last_activity: Option<String>,
 }
 
 #[pymethods]

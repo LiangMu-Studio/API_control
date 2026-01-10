@@ -1,6 +1,6 @@
 [package]
 name = "liangmu_history"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "High-performance history parser for AI CLI tools"
 
@@ -17,6 +17,9 @@ walkdir = "2"
 chrono = "0.4"
 parking_lot = "0.12"
 dirs = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+lru = "0.12"
+lazy_static = "1.5"
 
 [profile.release]
 lto = true

@@ -346,6 +346,7 @@ impl CliHistoryProvider for CodexProvider {
                 cwd: Some(cwd),
                 last_modified: mtime,
                 session_count: 0, // 会在 load_project 时填充
+                last_activity: None,
             })
             .collect();
 

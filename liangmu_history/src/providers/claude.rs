@@ -309,6 +309,7 @@ impl CliHistoryProvider for ClaudeProvider {
                     cwd,
                     last_modified: mtime,
                     session_count,
+                    last_activity: None,
                 })
             })
             .collect()

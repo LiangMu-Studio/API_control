@@ -18,6 +18,12 @@ from ..common import (
 from ..clipboard_paste import enable_clipboard_paste
 from ..database import history_manager, codex_history_manager
 
+# 导入 Rust 历史记录模块
+try:
+    import liangmu_history as lh
+except ImportError:
+    lh = None
+
 def _safe_env_value(val: str) -> str:
     """转义环境变量值中的特殊字符，防止命令注入"""
     if not val:
@@ -215,36 +221,75 @@ def create_api_page(state):
             return get_cli_type(state.configs[state.selected_config])
         return 'claude'
 
-    def build_session_options(cwd):
-        """构建会话选项列表（根据选中 KEY 的 cli_type 加载对应历史）"""
+    def build_session_options(cwd, force_refresh=False):
+        """构建会话选项列表 - 复刻 DEV 版的缓存机制
+
+        流程:
+        1. 如果 Rust 模块可用，使用缓存机制
+        2. 否则回退到 Python 实现
+        """
         opts = []
         state._current_project = None
         cli_type = get_selected_cli_type()
 
-        if cli_type == 'codex' and codex_history_manager and cwd:
-            # Codex CLI 历史 - 只加载指定 cwd 的会话
-            sessions = []
-            for sid, info in codex_history_manager.load_project(cwd).items():
-                ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
-                sessions.append((ts, sid, info['file']))
-            sessions.sort()
-            for ts, sid, fpath in sessions:
-                opts.append(ft.dropdown.Option(key=str(fpath), text=f"{ts} | {sid[:12]}"[:50]))
-        elif cli_type == 'claude' and history_manager and cwd:
-            # Claude Code 历史
-            cwd_key = Path(cwd).name.lower().replace(' ', '-').replace('.', '-').replace('_', '-')
-            for pname in history_manager.list_projects(limit=30):
-                if cwd_key.replace('-', '') in pname.lower().replace('-', ''):
-                    state._current_project = pname
-                    break
-            if state._current_project:
-                sessions = []
-                for sid, info in history_manager.load_project(state._current_project).items():
-                    ts = info.get('last_timestamp', '')[:16].replace('T', ' ')
-                    sessions.append((ts, sid))
-                sessions.sort()
-                for ts, sid in sessions:
+        if not cwd:
+            opts.append(ft.dropdown.Option(key='__none__', text=L.get('no_old_session', '不加载旧对话')))
+            return opts
+
+        try:
+            raw_sessions = []
+
+            # 优先使用 Rust 缓存模块
+            if lh is not None:
+                if force_refresh:
+                    # 强制刷新：扫描文件系统 -> 更新缓存 -> 返回会话列表
+                    raw_sessions = lh.refresh_and_load_sessions(cli_type, cwd)
+                else:
+                    # 快速模式：优先从缓存查找
+                    project = lh.find_project_by_cwd_cached(cli_type, cwd)
+                    if project:
+                        state._current_project = project.id
+                        raw_sessions = lh.load_project_from_cache(cli_type, project.id)
+                        if not raw_sessions:
+                            # 缓存为空，回退到文件系统
+                            raw_sessions = lh.load_project(cli_type, project.id)
+                    else:
+                        # 缓存没有，尝试文件系统查找
+                        project = lh.find_project_by_cwd(cli_type, cwd)
+                        if project:
+                            state._current_project = project.id
+                            raw_sessions = lh.refresh_and_load_sessions(cli_type, cwd)
+            else:
+                # 回退到 Python 实现
+                hm = codex_history_manager if cli_type == 'codex' else history_manager
+                if hm:
+                    project = hm.find_project_by_cwd(cwd)
+                    if project:
+                        state._current_project = project
+                        raw_sessions = hm.load_project(project) or []
+
+            # 转换为下拉选项
+            for s in raw_sessions:
+                # 兼容 Rust SessionInfo 和 Python dict
+                if hasattr(s, 'last_timestamp'):
+                    ts = (s.last_timestamp or '')[:16].replace('T', ' ')
+                    sid = s.id
+                    fpath = s.file_path
+                else:
+                    ts = (s.get('last_timestamp') or '')[:16].replace('T', ' ')
+                    sid = s.get('id', '')
+                    fpath = s.get('file_path', '')
+
+                if cli_type == 'codex':
+                    opts.append(ft.dropdown.Option(key=fpath, text=f"{ts} | {sid[:12]}"[:50]))
+                else:
                     opts.append(ft.dropdown.Option(key=sid, text=f"{ts} | {sid[:12]}"[:50]))
+                    if not state._current_project:
+                        state._current_project = sid  # 记录用于预览
+
+        except Exception as e:
+            print(f"[build_session_options] 错误: {e}")
+
         opts.append(ft.dropdown.Option(key='__none__', text=L.get('no_old_session', '不加载旧对话')))
         return opts
 
@@ -306,21 +351,31 @@ def create_api_page(state):
 
     _session_loaded = [False]
     _session_loading = [False]  # 防止重复加载
+    _initial_load_done = [False]  # 启动延迟加载标记
 
-    def refresh_session_dropdown_async():
-        """后台异步加载会话列表"""
+    def refresh_session_dropdown_async(force_refresh=False):
+        """后台异步加载会话列表 - 复刻 DEV 版的延迟加载机制"""
         if _session_loading[0]:
             return
         _session_loading[0] = True
         cwd = work_dir_input.value
 
         def do_load():
-            opts = build_session_options(cwd)
+            opts = build_session_options(cwd, force_refresh=force_refresh)
             def update_ui():
                 session_dropdown.options = opts
                 session_dropdown.value = '__none__'
                 if len(opts) > 1:
-                    session_dropdown.value = opts[-2].key
+                    # 恢复上次选中的会话
+                    last_session = state.settings.get('last_session', '')
+                    found = False
+                    for opt in opts:
+                        if opt.key == last_session:
+                            session_dropdown.value = last_session
+                            found = True
+                            break
+                    if not found:
+                        session_dropdown.value = opts[-2].key  # 最新会话
                 _session_loaded[0] = True
                 _session_loading[0] = False
                 page.update()
@@ -329,15 +384,24 @@ def create_api_page(state):
         import threading
         threading.Thread(target=do_load, daemon=True).start()
 
-    def refresh_session_dropdown():
+    def refresh_session_dropdown(force_refresh=False):
         cwd = work_dir_input.value
-        session_dropdown.options = build_session_options(cwd)
+        session_dropdown.options = build_session_options(cwd, force_refresh=force_refresh)
         session_dropdown.value = '__none__'
         # 默认选中最新会话（最后一个非 __none__ 选项）
         if len(session_dropdown.options) > 1:
             session_dropdown.value = session_dropdown.options[-2].key
         _session_loaded[0] = True
         page.update()
+
+    def save_selected_session(e):
+        """保存选中的会话到 settings"""
+        if e.control.value and e.control.value != '__none__':
+            state.settings['last_session'] = e.control.value
+            save_settings(state.settings)
+
+    # 给 session_dropdown 添加 on_change
+    session_dropdown.on_change = save_selected_session
 
     # 工作目录变化时刷新会话列表
     def on_workdir_change(e):

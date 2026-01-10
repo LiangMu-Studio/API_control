@@ -3,6 +3,7 @@
 //! 为 AI CLI 工具（Claude、Codex 等）提供高性能的历史记录解析功能。
 //! 通过 PyO3 暴露给 Python 使用。
 
+mod cache;
 mod provider;
 mod providers;
 mod types;
@@ -450,6 +451,141 @@ fn export_to_markdown(cli_type: &str, file_path: &str) -> PyResult<String> {
     Ok(lines.join(""))
 }
 
+// ==================== 缓存相关 Python 绑定 ====================
+
+/// 从缓存查找匹配 cwd 的项目
+#[pyfunction]
+fn find_project_by_cwd_cached(cli_type: &str, cwd: &str) -> PyResult<Option<Project>> {
+    Ok(cache::find_project_by_cwd_cached(cli_type, cwd))
+}
+
+/// 从缓存加载项目会话列表
+#[pyfunction]
+fn load_project_from_cache(cli_type: &str, project_id: &str) -> PyResult<Vec<SessionInfo>> {
+    Ok(cache::load_project_from_cache(cli_type, project_id))
+}
+
+/// 刷新缓存并加载会话（DEV 版核心功能）
+#[pyfunction]
+fn refresh_and_load_sessions(cli_type: &str, cwd: &str) -> PyResult<Vec<SessionInfo>> {
+    // 1. 先从文件系统找到匹配的项目
+    let project = match cli_type {
+        "claude" => {
+            let provider = get_claude_provider()
+                .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Claude 目录不存在"))?;
+            provider.find_project_by_cwd(cwd)
+        }
+        "codex" => {
+            let provider = get_codex_provider()
+                .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Codex 目录不存在"))?;
+            provider.find_project_by_cwd(cwd)
+        }
+        _ => return Ok(Vec::new()),
+    };
+
+    let project = match project {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+
+    // 2. 刷新该项目的缓存（只刷新有变化的文件）
+    if cli_type == "claude" {
+        if let Some(provider) = get_claude_provider() {
+            let sessions = provider.load_project(&project.id);
+            for session in &sessions {
+                let file_mtime = cache::get_file_mtime(&session.file_path);
+                if !cache::is_cache_valid(cli_type, &session.file_path, file_mtime) {
+                    cache::update_cache_entry(
+                        cli_type,
+                        &session.file_path,
+                        &project.id,
+                        &session.id,
+                        session.message_count,
+                        session.first_timestamp.as_deref(),
+                        session.last_timestamp.as_deref(),
+                        file_mtime,
+                        session.cwd.as_deref(),
+                    ).ok();
+                }
+            }
+            return Ok(sessions);
+        }
+    } else if cli_type == "codex" {
+        if let Some(provider) = get_codex_provider() {
+            let sessions = provider.load_project(&project.id);
+            for session in &sessions {
+                let file_mtime = cache::get_file_mtime(&session.file_path);
+                if !cache::is_cache_valid(cli_type, &session.file_path, file_mtime) {
+                    cache::update_cache_entry(
+                        cli_type,
+                        &session.file_path,
+                        &project.id,
+                        &session.id,
+                        session.message_count,
+                        session.first_timestamp.as_deref(),
+                        session.last_timestamp.as_deref(),
+                        file_mtime,
+                        session.cwd.as_deref(),
+                    ).ok();
+                }
+            }
+            return Ok(sessions);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+/// 启动时增量刷新历史缓存
+#[pyfunction]
+fn refresh_history_on_startup(cli_type: &str) -> PyResult<usize> {
+    let last_startup = cache::get_last_startup_time(cli_type);
+    cache::update_startup_time(cli_type).ok();
+
+    let mut updated_count = 0;
+
+    if cli_type == "claude" {
+        if let Some(provider) = get_claude_provider() {
+            for project in provider.list_projects(0) {
+                let sessions = provider.load_project(&project.id);
+                for session in sessions {
+                    let file_mtime = cache::get_file_mtime(&session.file_path);
+                    if file_mtime > last_startup && !cache::is_cache_valid(cli_type, &session.file_path, file_mtime) {
+                        cache::update_cache_entry(
+                            cli_type,
+                            &session.file_path,
+                            &project.id,
+                            &session.id,
+                            session.message_count,
+                            session.first_timestamp.as_deref(),
+                            session.last_timestamp.as_deref(),
+                            file_mtime,
+                            session.cwd.as_deref(),
+                        ).ok();
+                        updated_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(updated_count)
+}
+
+/// 清空缓存
+#[pyfunction]
+fn clear_cache(cli_type: &str) -> PyResult<usize> {
+    cache::clear_cache(cli_type)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+}
+
+/// 清空内存缓存
+#[pyfunction]
+fn clear_memory_cache() -> PyResult<()> {
+    cache::clear_memory_cache();
+    Ok(())
+}
+
 /// Python 模块定义
 #[pymodule]
 fn liangmu_history(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -462,7 +598,7 @@ fn liangmu_history(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PaginatedMessages>()?;
     m.add_class::<TrashItem>()?;
 
-    // 注册函数
+    // 注册函数 - 基础功能
     m.add_function(wrap_pyfunction!(list_cli_types, m)?)?;
     m.add_function(wrap_pyfunction!(list_projects, m)?)?;
     m.add_function(wrap_pyfunction!(find_project_by_cwd, m)?)?;
@@ -476,6 +612,14 @@ fn liangmu_history(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(permanently_delete, m)?)?;
     m.add_function(wrap_pyfunction!(cleanup_expired_trash, m)?)?;
     m.add_function(wrap_pyfunction!(export_to_markdown, m)?)?;
+
+    // 注册函数 - 缓存功能（DEV 版核心）
+    m.add_function(wrap_pyfunction!(find_project_by_cwd_cached, m)?)?;
+    m.add_function(wrap_pyfunction!(load_project_from_cache, m)?)?;
+    m.add_function(wrap_pyfunction!(refresh_and_load_sessions, m)?)?;
+    m.add_function(wrap_pyfunction!(refresh_history_on_startup, m)?)?;
+    m.add_function(wrap_pyfunction!(clear_cache, m)?)?;
+    m.add_function(wrap_pyfunction!(clear_memory_cache, m)?)?;
 
     Ok(())
 }

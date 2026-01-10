@@ -145,7 +145,8 @@ def create_api_page(state):
         save_work_dir(path)
         work_dir_input.update()
         _session_loaded[0] = False
-        refresh_session_dropdown_async()
+        # 复刻 DEV 版：文件夹变化时强制刷新缓存
+        refresh_session_dropdown_async(force_refresh=True)
 
     work_dir_input = ft.TextField(
         label=L['work_dir'],
@@ -268,6 +269,9 @@ def create_api_page(state):
                         state._current_project = project
                         raw_sessions = hm.load_project(project) or []
 
+            # 缓存会话列表供预览使用
+            state._sessions_cache = raw_sessions
+
             # 转换为下拉选项
             for s in raw_sessions:
                 # 兼容 Rust SessionInfo 和 Python dict
@@ -300,25 +304,70 @@ def create_api_page(state):
         width=400,
     )
 
+    # 预览状态 - 复刻 DEV 版的分页加载机制
+    _preview_paginated = [None]  # PaginatedMessages
+    _preview_all_messages = [[]]  # 当没有中间部分时的全部消息
+    _preview_first_turns = [3]  # 当前加载的前段轮数
+    _preview_last_turns = [3]   # 当前加载的后段轮数
+
     def show_session_preview(_):
+        """显示会话预览 - 复刻 DEV 版的分页预览"""
         sid = session_dropdown.value
         if sid == '__none__':
             show_snackbar(page, L.get('no_session_selected', '请先选择一个会话'))
             return
+
+        cli_type = get_selected_cli_type()
+
+        # 获取会话文件路径
+        file_path = None
+        if hasattr(state, '_sessions_cache') and state._sessions_cache:
+            for s in state._sessions_cache:
+                s_id = s.id if hasattr(s, 'id') else s.get('id', '')
+                s_path = s.file_path if hasattr(s, 'file_path') else s.get('file_path', '')
+                if s_id == sid or s_path == sid:
+                    file_path = s_path
+                    break
+
+        if not file_path:
+            show_snackbar(page, L.get('session_not_found', '会话文件未找到'))
+            return
+
+        # 使用 Rust 分页加载（首尾各3轮）
+        _preview_first_turns[0] = 3
+        _preview_last_turns[0] = 3
+
+        try:
+            if lh is not None:
+                paginated = lh.load_session_paginated(cli_type, file_path, 3, 3)
+                if paginated is None:
+                    show_snackbar(page, L.get('load_failed', '加载失败'))
+                    return
+                _preview_paginated[0] = paginated
+                _preview_all_messages[0] = []
+                if not paginated.has_middle:
+                    _preview_all_messages[0] = list(paginated.first)
+                _show_preview_dialog(file_path)
+            else:
+                # 回退到旧的预览方式
+                _show_legacy_preview(sid)
+        except Exception as e:
+            print(f"[show_session_preview] 错误: {e}")
+            show_snackbar(page, f"预览失败: {e}")
+
+    def _show_legacy_preview(sid):
+        """旧版预览（Python 实现）"""
         if not getattr(state, '_current_project', None):
             show_snackbar(page, L.get('no_project_found', '未找到匹配的项目'))
             return
-        # 加载该会话的完整数据
-        sessions = history_manager.load_project(state._current_project)
+        sessions = history_manager.load_project(state._current_project) if history_manager else {}
         info = sessions.get(sid)
         if not info:
             return
-        # 提取最后一轮对话
         messages = info.get('messages', [])
         last_user_txt, last_ai_txt = '', ''
         for m in reversed(messages):
-            msg_type = m.get('type')  # 'user' 或 'assistant'
-            # Claude JSONL: message.content 是数组
+            msg_type = m.get('type')
             msg_obj = m.get('message', {})
             if isinstance(msg_obj, dict):
                 for x in msg_obj.get('content', []):
@@ -330,7 +379,6 @@ def create_api_page(state):
                             last_user_txt = txt[:500]
             if last_user_txt and last_ai_txt:
                 break
-        # 显示弹窗
         dlg = ft.AlertDialog(
             title=ft.Text(f"会话: {sid[:30]}"),
             content=ft.Container(
@@ -343,11 +391,127 @@ def create_api_page(state):
                 ], scroll=ft.ScrollMode.AUTO),
                 width=550, height=350,
             ),
-            actions=[ft.TextButton("关闭", on_click=lambda _: page.close(dlg))],
+            actions=[ft.TextButton(L.get('close', '关闭'), on_click=lambda _: page.close(dlg))],
         )
         page.open(dlg)
 
-    session_preview_btn = ft.IconButton(ft.Icons.PREVIEW, tooltip="预览最后对话", on_click=show_session_preview)
+    def _render_message(msg, step):
+        """渲染单条消息"""
+        role = msg.role if hasattr(msg, 'role') else msg.get('role', '')
+        is_user = role == 'user'
+        # 获取文本内容
+        if hasattr(msg, 'content_blocks'):
+            text_parts = [b.text for b in msg.content_blocks if b.text]
+            text = '\n'.join(text_parts)[:800]
+        else:
+            text = msg.get('text', '')[:800]
+
+        return ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text(f"#{step}", size=10, color=ft.Colors.GREY_500),
+                    ft.Text("👤 用户" if is_user else "🤖 AI",
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.BLUE if is_user else ft.Colors.GREEN),
+                ], spacing=5),
+                ft.Text(text or '(无内容)', selectable=True, size=13),
+            ], spacing=3),
+            padding=ft.padding.only(left=10, top=5, bottom=5, right=10),
+            border=ft.border.only(left=ft.BorderSide(3, ft.Colors.BLUE if is_user else ft.Colors.GREEN)),
+            margin=ft.margin.only(bottom=8),
+        )
+
+    def _show_preview_dialog(file_path):
+        """显示分页预览对话框 - 复刻 DEV 版"""
+        paginated = _preview_paginated[0]
+        if paginated is None:
+            return
+
+        cli_type = get_selected_cli_type()
+
+        def load_more_down(_):
+            """向下展开（加载更多前面的消息）"""
+            nonlocal paginated
+            _preview_first_turns[0] += 10
+            try:
+                new_paginated = lh.load_session_paginated(cli_type, file_path, _preview_first_turns[0], _preview_last_turns[0])
+                if new_paginated:
+                    _preview_paginated[0] = new_paginated
+                    paginated = new_paginated
+                    if not new_paginated.has_middle:
+                        _preview_all_messages[0] = list(new_paginated.first) + list(new_paginated.last)
+                    _refresh_preview_content()
+            except Exception as e:
+                print(f"[load_more_down] 错误: {e}")
+
+        def load_more_up(_):
+            """向上展开（加载更多后面的消息）"""
+            nonlocal paginated
+            _preview_last_turns[0] += 10
+            try:
+                new_paginated = lh.load_session_paginated(cli_type, file_path, _preview_first_turns[0], _preview_last_turns[0])
+                if new_paginated:
+                    _preview_paginated[0] = new_paginated
+                    paginated = new_paginated
+                    if not new_paginated.has_middle:
+                        _preview_all_messages[0] = list(new_paginated.first) + list(new_paginated.last)
+                    _refresh_preview_content()
+            except Exception as e:
+                print(f"[load_more_up] 错误: {e}")
+
+        def _refresh_preview_content():
+            """刷新预览内容"""
+            paginated = _preview_paginated[0]
+            content_col.controls.clear()
+
+            if paginated.has_middle:
+                # 有中间部分：显示前段 + 展开按钮 + 后段
+                step = 1
+                for msg in paginated.first:
+                    content_col.controls.append(_render_message(msg, step))
+                    step += 1
+
+                # 中间展开区域
+                first_user_count = sum(1 for m in paginated.first if (m.role if hasattr(m, 'role') else m.get('role', '')) == 'user')
+                last_user_count = sum(1 for m in paginated.last if (m.role if hasattr(m, 'role') else m.get('role', '')) == 'user')
+                hidden_turns = paginated.total_turns - first_user_count - last_user_count
+
+                content_col.controls.append(ft.Container(
+                    content=ft.Row([
+                        ft.ElevatedButton(f"↓ {L.get('expand_down', '向下展开')} +10", on_click=load_more_down),
+                        ft.Text(f"{L.get('hidden', '隐藏')} {hidden_turns} {L.get('turns', '轮')}", color=ft.Colors.GREY_500),
+                        ft.ElevatedButton(f"↑ {L.get('expand_up', '向上展开')} +10", on_click=load_more_up),
+                    ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
+                    padding=ft.padding.symmetric(vertical=15),
+                ))
+
+                # 后段消息
+                start_step = paginated.total - len(paginated.last) + 1
+                for i, msg in enumerate(paginated.last):
+                    content_col.controls.append(_render_message(msg, start_step + i))
+            else:
+                # 没有中间部分：显示全部消息
+                messages = _preview_all_messages[0] if _preview_all_messages[0] else list(paginated.first)
+                for i, msg in enumerate(messages):
+                    content_col.controls.append(_render_message(msg, i + 1))
+
+            page.update()
+
+        # 初始化内容
+        content_col = ft.Column([], scroll=ft.ScrollMode.AUTO, spacing=0)
+        _refresh_preview_content()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(f"{L.get('preview', '预览')} ({paginated.total_turns} {L.get('turns', '轮')})"),
+            content=ft.Container(
+                content_col,
+                width=650, height=450,
+            ),
+            actions=[ft.TextButton(L.get('close', '关闭'), on_click=lambda _: page.close(dlg))],
+        )
+        page.open(dlg)
+
+    session_preview_btn = ft.IconButton(ft.Icons.PREVIEW, tooltip=L.get('preview_session', '预览会话'), on_click=show_session_preview)
 
     _session_loaded = [False]
     _session_loading = [False]  # 防止重复加载
@@ -403,11 +567,11 @@ def create_api_page(state):
     # 给 session_dropdown 添加 on_change
     session_dropdown.on_change = save_selected_session
 
-    # 工作目录变化时刷新会话列表
+    # 工作目录变化时刷新会话列表 - 复刻 DEV 版强制刷新
     def on_workdir_change(e):
         save_work_dir(e.control.value)
         _session_loaded[0] = False  # 重置加载状态
-        refresh_session_dropdown_async()
+        refresh_session_dropdown_async(force_refresh=True)  # 强制刷新缓存
 
     work_dir_input.on_submit = on_workdir_change
     work_dir_input.on_blur = on_workdir_change
@@ -994,7 +1158,8 @@ def create_api_page(state):
                 save_work_dir(result.path)
                 work_dir_menu.items = build_workdir_menu_items()
                 _session_loaded[0] = False
-                refresh_session_dropdown_async()  # 刷新会话列表
+                # 复刻 DEV 版：浏览选择新文件夹时强制刷新缓存
+                refresh_session_dropdown_async(force_refresh=True)
         file_picker.on_result = on_result
         # 如果当前目录不存在，向上查找存在的父目录
         initial_dir = work_dir_input.value or None
@@ -1449,6 +1614,24 @@ def create_api_page(state):
     if last_idx is not None and 0 <= last_idx < len(state.configs):
         state.select_config(last_idx)
         _update_selection()
+
+    # 复刻 DEV 版：启动时延迟刷新历史缓存（800ms 后后台刷新）
+    def delayed_startup_refresh():
+        import time as _time
+        _time.sleep(0.8)  # 800ms 延迟
+        if work_dir_input.value and not _initial_load_done[0]:
+            _initial_load_done[0] = True
+            # 后台刷新缓存
+            if lh is not None:
+                try:
+                    cli_type = get_selected_cli_type()
+                    lh.refresh_history_on_startup(cli_type)
+                except Exception as e:
+                    print(f"[delayed_startup_refresh] 错误: {e}")
+            # 刷新会话列表
+            refresh_session_dropdown_async(force_refresh=False)
+
+    threading.Thread(target=delayed_startup_refresh, daemon=True).start()
 
     # 构建页面
     api_page = ft.Column([

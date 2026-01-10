@@ -2,6 +2,7 @@
 import flet as ft
 import json
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -16,6 +17,13 @@ from ..common import (
 )
 from ..clipboard_paste import enable_clipboard_paste
 from ..database import history_manager, codex_history_manager
+
+def _safe_env_value(val: str) -> str:
+    """转义环境变量值中的特殊字符，防止命令注入"""
+    if not val:
+        return val
+    # 只移除命令分隔符，保留 % 等合法字符
+    return re.sub(r'[&|<>^]', '', val)
 
 # 辅助函数：从配置获取 cli_type（兼容新旧格式）
 def get_cli_type(cfg):
@@ -114,16 +122,25 @@ def create_api_page(state):
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
-    def build_workdir_options():
-        opts = [ft.dropdown.Option(d, d[-50:] if len(d) > 50 else d) for d in reversed(work_dir_history[-10:])]
-        return opts
+    def build_workdir_menu_items():
+        return [ft.PopupMenuItem(text=d, on_click=lambda e, p=d: select_workdir(p)) for d in reversed(work_dir_history[-10:])]
 
-    work_dir_dropdown = ft.Dropdown(
+    def select_workdir(path):
+        work_dir_input.value = path
+        save_work_dir(path)
+        work_dir_input.update()
+        _session_loaded[0] = False
+        refresh_session_dropdown_async()
+
+    work_dir_input = ft.TextField(
         label=L['work_dir'],
         value=current_work_dir,
-        options=build_workdir_options(),
         expand=True,
-        on_change=lambda e: save_work_dir(e.control.value),
+    )
+    work_dir_menu = ft.PopupMenuButton(
+        icon=ft.Icons.ARROW_DROP_DOWN,
+        items=build_workdir_menu_items(),
+        tooltip=L.get('history', '历史记录'),
     )
 
     def save_work_dir(path):
@@ -152,15 +169,15 @@ def create_api_page(state):
             save_settings(state.settings)
             # 更新 UI
             def update_ui():
-                work_dir_dropdown.value = work_dir_history[-1]
-                work_dir_dropdown.options = build_workdir_options()
+                work_dir_input.value = work_dir_history[-1]
+                work_dir_menu.items = build_workdir_menu_items()
                 page.update()
             page.run_thread(update_ui)
     import threading
     threading.Thread(target=init_workdir_history_bg, daemon=True).start()
 
     def clear_workdir_history(e):
-        current = work_dir_dropdown.value
+        current = work_dir_input.value
         if not current or current not in work_dir_history:
             return
         def do_clear(_):
@@ -169,9 +186,9 @@ def create_api_page(state):
             work_dir_history.remove(current)
             state.settings['work_dir_history'] = work_dir_history[-10:]
             save_settings(state.settings)
-            work_dir_dropdown.options = build_workdir_options()
-            work_dir_dropdown.value = work_dir_history[-1] if work_dir_history else None
-            state.settings['work_dir'] = work_dir_dropdown.value
+            work_dir_menu.items = build_workdir_menu_items()
+            work_dir_input.value = work_dir_history[-1] if work_dir_history else None
+            state.settings['work_dir'] = work_dir_input.value
             save_settings(state.settings)
             show_snackbar(page, L.get('history_cleared_with_sessions', '已删除: {} ({}个会话移到回收站)').format(current[-30:], cnt))
             page.update()
@@ -286,7 +303,7 @@ def create_api_page(state):
         if _session_loading[0]:
             return
         _session_loading[0] = True
-        cwd = work_dir_dropdown.value
+        cwd = work_dir_input.value
 
         def do_load():
             opts = build_session_options(cwd)
@@ -304,7 +321,7 @@ def create_api_page(state):
         threading.Thread(target=do_load, daemon=True).start()
 
     def refresh_session_dropdown():
-        cwd = work_dir_dropdown.value
+        cwd = work_dir_input.value
         session_dropdown.options = build_session_options(cwd)
         session_dropdown.value = '__none__'
         # 默认选中最新会话（最后一个非 __none__ 选项）
@@ -319,7 +336,8 @@ def create_api_page(state):
         _session_loaded[0] = False  # 重置加载状态
         refresh_session_dropdown_async()
 
-    work_dir_dropdown.on_change = on_workdir_change
+    work_dir_input.on_submit = on_workdir_change
+    work_dir_input.on_blur = on_workdir_change
 
     # 懒加载：点击会话下拉框时才加载
     def on_session_focus(e):
@@ -899,13 +917,20 @@ def create_api_page(state):
     def browse_folder(e):
         def on_result(result):
             if result.path:
-                work_dir_dropdown.value = result.path
+                work_dir_input.value = result.path
                 save_work_dir(result.path)
-                work_dir_dropdown.options = build_workdir_options()
+                work_dir_menu.items = build_workdir_menu_items()
                 _session_loaded[0] = False
                 refresh_session_dropdown_async()  # 刷新会话列表
         file_picker.on_result = on_result
-        file_picker.get_directory_path(initial_directory=work_dir_dropdown.value or None)
+        # 如果当前目录不存在，向上查找存在的父目录
+        initial_dir = work_dir_input.value or None
+        if initial_dir:
+            p = Path(initial_dir)
+            while p and not p.is_dir():
+                p = p.parent if p.parent != p else None
+            initial_dir = str(p) if p and p.is_dir() else None
+        file_picker.get_directory_path(initial_directory=initial_dir)
 
     def refresh_terminals_click(e):
         state.terminals = detect_terminals()
@@ -943,13 +968,8 @@ def create_api_page(state):
         env[key_name] = api_key
         if endpoint:
             env[base_url_env] = endpoint
-        # 调试：打印环境变量
-        print(f"[DEBUG] cli_type={cli_type}, command={cli_info.get('command')}")
-        print(f"[DEBUG] {key_name}={api_key[:20]}...")
-        print(f"[DEBUG] {base_url_env}={endpoint}")
-        print(f"[DEBUG] model={selected_model}")
         terminal_cmd = state.terminals.get(terminal_dropdown.value, 'cmd')
-        cwd = work_dir_dropdown.value or None
+        cwd = work_dir_input.value or None
         # 验证工作目录是否存在
         if cwd and not Path(cwd).is_dir():
             show_snackbar(page, L.get('invalid_workdir', '工作目录不存在: {}').format(cwd))
@@ -963,33 +983,64 @@ def create_api_page(state):
         if cli_type == 'claude' and session_id and session_id != '__none__':
             cli_cmd = f"{cli_cmd} --resume {session_id}"
         if sys.platform == 'win32':
-            # Gemini CLI 需要永久环境变量，其他 CLI 用临时变量
-            if cli_type == 'gemini':
-                # 用 setx 设置永久环境变量（不加引号）
-                setx_cmds = [f'setx {key_name} {api_key}']
-                if endpoint:
-                    setx_cmds.append(f'setx {base_url_env} {endpoint}')
+            # 安全处理环境变量值
+            safe_key = _safe_env_value(api_key)
+            safe_endpoint = _safe_env_value(endpoint)
+            safe_model = _safe_env_value(selected_model)
+            # 设置环境变量
+            env[key_name] = safe_key
+            if endpoint:
+                env[base_url_env] = safe_endpoint
+            if selected_model:
                 model_env = cfg.get('provider', {}).get('model_env', '')
-                if selected_model and model_env:
-                    setx_cmds.append(f'setx {model_env} {selected_model}')
-                # 同时设置当前会话的临时变量
-                set_cmds = [f'set {key_name}={api_key}']
-                if endpoint:
-                    set_cmds.append(f'set {base_url_env}={endpoint}')
-                if selected_model and model_env:
-                    set_cmds.append(f'set {model_env}={selected_model}')
-                full_cmd = ' && '.join(setx_cmds + set_cmds + [cli_cmd])
+                if model_env:
+                    env[model_env] = safe_model
+            # 根据终端类型选择启动方式
+            term_lower = terminal_cmd.lower()
+            if 'pwsh' in term_lower or 'powershell' in term_lower:
+                # PowerShell 7 或 5 - 使用 -WorkingDirectory 参数
+                args = [terminal_cmd, '-NoExit']
+                if cwd:
+                    args.extend(['-WorkingDirectory', cwd])
+                args.extend(['-Command', cli_cmd])
+                subprocess.Popen(args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            elif 'bash' in term_lower:
+                # Git Bash - cwd 参数已经设置工作目录
+                subprocess.Popen([terminal_cmd, '-c', f'{cli_cmd}; exec bash'], cwd=cwd, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            elif 'wt' in term_lower:
+                # Windows Terminal - 使用 -d 参数指定工作目录
+                args = [terminal_cmd]
+                if cwd:
+                    args.extend(['-d', cwd])
+                args.extend(['pwsh', '-NoExit', '-Command', cli_cmd])
+                subprocess.Popen(args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
             else:
-                # 其他 CLI 用临时环境变量
-                set_cmds = [f'set {key_name}={api_key}']
-                if endpoint:
-                    set_cmds.append(f'set {base_url_env}={endpoint}')
-                if selected_model:
+                # CMD - codex 需要用 npx 运行
+                if cli_cmd.startswith('codex'):
+                    cli_cmd = cli_cmd.replace('codex', 'npx @openai/codex', 1)
+                if cli_type == 'gemini':
+                    setx_cmds = [f'setx {key_name} {safe_key}']
+                    if endpoint:
+                        setx_cmds.append(f'setx {base_url_env} {safe_endpoint}')
                     model_env = cfg.get('provider', {}).get('model_env', '')
-                    if model_env:
-                        set_cmds.append(f'set {model_env}={selected_model}')
-                full_cmd = ' && '.join(set_cmds + [cli_cmd])
-            subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    if selected_model and model_env:
+                        setx_cmds.append(f'setx {model_env} {safe_model}')
+                    set_cmds = [f'set {key_name}={safe_key}']
+                    if endpoint:
+                        set_cmds.append(f'set {base_url_env}={safe_endpoint}')
+                    if selected_model and model_env:
+                        set_cmds.append(f'set {model_env}={safe_model}')
+                    full_cmd = ' && '.join(setx_cmds + set_cmds + [cli_cmd])
+                else:
+                    set_cmds = [f'set {key_name}={safe_key}']
+                    if endpoint:
+                        set_cmds.append(f'set {base_url_env}={safe_endpoint}')
+                    if selected_model:
+                        model_env = cfg.get('provider', {}).get('model_env', '')
+                        if model_env:
+                            set_cmds.append(f'set {model_env}={safe_model}')
+                    full_cmd = ' && '.join(set_cmds + [cli_cmd])
+                subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
             subprocess.Popen([terminal_cmd, '-e', cli_cmd], env=env, cwd=cwd)
         # 记录启动日志
@@ -1000,7 +1051,7 @@ def create_api_page(state):
         """应用选中的提示词"""
         if not prompt_dropdown.value:
             return
-        if not work_dir_dropdown.value:
+        if not work_dir_input.value:
             show_snackbar(page, L['prompt_select_workdir'])
             return
         cli_type = 'claude'
@@ -1012,7 +1063,7 @@ def create_api_page(state):
         user_content = user_prompt.get('content', '')
         user_id = prompt_dropdown.value
         try:
-            file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_dropdown.value)
+            file_path = write_prompt_to_cli(cli_type, system_content, user_content, user_id, work_dir_input.value)
             show_snackbar(page, L['prompt_written'].format(file_path))
         except Exception as ex:
             show_snackbar(page, L['prompt_write_fail'].format(ex))
@@ -1248,7 +1299,7 @@ def create_api_page(state):
             if captured_keys:
                 new_key = "+".join(p.lower() for p in captured_keys)
                 if key_type == "screenshot":
-                    update_hotkey(new_key, work_dir_dropdown.value, page)
+                    update_hotkey(new_key, work_dir_input.value, page)
                     hotkey_btn.text = f"截图 {'+'.join(captured_keys)}"
                 else:
                     update_copypath_hotkey(new_key)
@@ -1326,7 +1377,7 @@ def create_api_page(state):
             ft.TextButton(L['refresh_envs'], icon=ft.Icons.REFRESH, on_click=refresh_envs_click),
             ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),
-        ft.Row([work_dir_dropdown, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
+        ft.Row([work_dir_input, work_dir_menu, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
                 ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history)]),
         ft.Row([session_dropdown, session_preview_btn, ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
         ft.Row([

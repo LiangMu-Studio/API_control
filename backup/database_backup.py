@@ -374,99 +374,75 @@ class TrashManager:
         self._save_manifest(manifest)
 
 
-# ========== Claude 历史记录管理器 (使用 Rust 加速库) ==========
-import liangmu_history as lh
-
-
-class RustTrashManager:
-    """基于 Rust 库的回收站管理器"""
-    def __init__(self, cli_type: str):
-        self.cli_type = cli_type
-
-    def get_trash_items(self) -> list:
-        items = lh.get_trash_items(self.cli_type)
-        return [{'session_id': i.session_id, 'project_name': i.project_name,
-                 'deleted_at': i.deleted_at, 'dir_name': i.dir_name,
-                 'original_file': i.original_file} for i in items]
-
-    def restore_from_trash(self, item: dict) -> bool:
-        try:
-            lh.restore_from_trash(self.cli_type, item['dir_name'])
-            return True
-        except Exception:
-            return False
-
-    def permanently_delete(self, item: dict):
-        lh.permanently_delete(self.cli_type, item['dir_name'])
-
-    def cleanup_expired(self) -> int:
-        return lh.cleanup_expired_trash(self.cli_type, TRASH_RETENTION_DAYS)
-
-
+# ========== Claude 历史记录管理器 ==========
 class HistoryManager:
-    """Claude 历史记录管理器 - 使用 Rust 加速"""
     def __init__(self, claude_dir: Path):
         self.claude_dir = claude_dir
-        self.trash_manager = RustTrashManager('claude')
+        self.trash_manager = TrashManager(claude_dir)
 
     def list_projects(self, with_cwd: bool = False, limit: int = 0) -> list:
-        projects = lh.list_projects('claude', limit if limit > 0 else 0)
+        """列出项目文件夹，按最后修改时间倒序
+        with_cwd: 是否同时获取每个项目的cwd（从第一个session读取）
+        limit: 限制返回数量，0表示不限制
+        """
+        projects_dir = self.claude_dir / "projects"
+        if not projects_dir.exists():
+            return []
+        dirs = [d for d in projects_dir.iterdir() if d.is_dir()]
+        dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        if limit > 0:
+            dirs = dirs[:limit]
         if not with_cwd:
-            return [p.id for p in projects]
-        return [(p.id, p.cwd or '') for p in projects]
+            return [d.name for d in dirs]
+        # 返回 [(folder_name, cwd), ...]
+        result = []
+        for d in dirs:
+            cwd = ''
+            for f in d.glob("*.jsonl"):
+                try:
+                    with open(f, 'r', encoding='utf-8') as fp:
+                        for line in fp:
+                            if '"cwd"' in line:
+                                import json
+                                data = json.loads(line)
+                                cwd = data.get('cwd', '')
+                                break
+                    if cwd:
+                        break
+                except (OSError, json.JSONDecodeError):
+                    pass
+            result.append((d.name, cwd))
+        return result
 
     def get_project_cwd(self, project_name: str) -> str:
-        projects = lh.list_projects('claude', 0)
-        for p in projects:
-            if p.id == project_name:
-                return p.cwd or ''
+        """获取项目的工作目录"""
+        project_dir = self.claude_dir / "projects" / project_name
+        if not project_dir.exists():
+            return ''
+        for f in project_dir.glob("*.jsonl"):
+            try:
+                with open(f, 'r', encoding='utf-8') as fp:
+                    for line in fp:
+                        if '"cwd"' in line:
+                            data = json.loads(line)
+                            return data.get('cwd', '')
+            except (OSError, json.JSONDecodeError):
+                pass
         return ''
 
     def load_project(self, project_name: str) -> dict:
-        sessions = lh.load_project('claude', project_name)
+        """加载单个项目的会话"""
+        project_dir = self.claude_dir / "projects" / project_name
         result = {}
-        for s in sessions:
-            full = lh.load_session('claude', s.file_path)
-            if full:
-                messages = self._convert_messages(full.messages)
-                result[s.id] = {
-                    'file': Path(s.file_path),
-                    'messages': messages,
-                    'message_count': s.message_count,
-                    'first_timestamp': s.first_timestamp,
-                    'last_timestamp': s.last_timestamp,
-                    'cwd': s.cwd,
-                    'size': s.file_size
-                }
-        return result
-
-    def _convert_messages(self, rust_messages) -> list:
-        """将 Rust Message 对象转换为 Python dict"""
-        result = []
-        for m in rust_messages:
-            content = []
-            for b in m.content_blocks:
-                block = {'type': b.block_type}
-                if b.text:
-                    block['text'] = b.text
-                if b.tool_name:
-                    block['name'] = b.tool_name
-                if b.tool_input:
-                    try:
-                        block['input'] = json.loads(b.tool_input)
-                    except json.JSONDecodeError:
-                        block['input'] = b.tool_input
-                content.append(block)
-            result.append({
-                'type': m.msg_type,
-                'uuid': m.uuid,
-                'timestamp': m.timestamp,
-                'message': {'role': m.role, 'content': content}
-            })
+        if not project_dir.exists():
+            return result
+        for session_file in project_dir.glob("*.jsonl"):
+            info = self._parse_session(session_file)
+            if info:
+                result[session_file.stem] = info
         return result
 
     def load_sessions(self, callback=None) -> dict:
-        """加载所有项目的会话（用于预加载）"""
         projects_dir = self.claude_dir / "projects"
         result = {}
         if not projects_dir.exists():
@@ -478,86 +454,264 @@ class HistoryManager:
             if callback:
                 callback(f"扫描: {project_dir.name[:30]}...")
             project_name = project_dir.name
-            result[project_name] = self.load_project(project_name)
+            result[project_name] = {}
+            for session_file in project_dir.glob("*.jsonl"):
+                session_id = session_file.stem
+                info = self._parse_session(session_file)
+                if info:
+                    result[project_name][session_id] = info
         return result
+
+    def _parse_session(self, session_file: Path) -> dict | None:
+        try:
+            messages = []
+            first_ts, last_ts, cwd = None, None, None
+            with open(session_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if data.get('type') in ('user', 'assistant'):
+                            ts = data.get('timestamp')
+                            if ts:
+                                if not first_ts:
+                                    first_ts = ts
+                                last_ts = ts
+                            if not cwd:
+                                cwd = data.get('cwd')
+                            messages.append(data)
+                    except json.JSONDecodeError:
+                        continue  # 跳过损坏的行
+            if not messages:
+                return None
+            return {
+                'file': session_file, 'messages': messages, 'message_count': len(messages),
+                'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
+                'size': session_file.stat().st_size
+            }
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _extract_text(self, content) -> str:
+        """从消息内容提取文本"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, dict):
+            text = ""
+            for c in content.get('content', []):
+                if isinstance(c, dict) and c.get('type') == 'text':
+                    text += c.get('text', '')
+            return text
+        return str(content)
 
     def delete_session(self, project_name: str, session_id: str, info: dict) -> bool:
-        try:
-            lh.delete_session('claude', str(info['file']))
-            return True
-        except Exception:
-            return False
+        file_history_dir = info['file'].parent / "file-history" / session_id
+        return self.trash_manager.move_to_trash(session_id, project_name, info['file'], file_history_dir if file_history_dir.exists() else None)
+
+    def delete_sessions_by_cwd(self, cwd: str) -> int:
+        """删除指定工作目录下的所有会话（移到回收站）"""
+        cwd_norm = Path(cwd).resolve().as_posix().lower().rstrip('/')
+        cnt = 0
+        for project_name in self.list_projects():
+            sessions = self.load_project(project_name)
+            for sid, info in sessions.items():
+                session_cwd = info.get('cwd', '')
+                if session_cwd and Path(session_cwd).resolve().as_posix().lower().rstrip('/') == cwd_norm:
+                    if self.delete_session(project_name, sid, info):
+                        cnt += 1
+        return cnt
 
     def export_to_markdown(self, session_id: str, info: dict) -> str:
-        try:
-            return lh.export_to_markdown('claude', str(info['file']))
-        except Exception:
-            return ''
+        lines = [f"# Claude 会话: {session_id}\n", f"路径: {info.get('cwd', '未知')}\n\n---\n\n"]
+        for msg in info['messages']:
+            role = msg.get('type', '未知')
+            content = msg.get('message', {})
+            if isinstance(content, dict):
+                text = ""
+                for c in content.get('content', []):
+                    if isinstance(c, dict) and c.get('type') == 'text':
+                        text += c.get('text', '')
+            else:
+                text = str(content)
+            lines.append(f"## {role.upper()}\n\n{text}\n\n---\n\n")
+        return ''.join(lines)
 
 
-# ========== Codex 历史记录管理器 (使用 Rust 加速库) ==========
+
+# ========== Codex 历史记录管理器 ==========
+# 尝试导入 Cython 加速模块
+try:
+    from core.fast_scan import scan_codex_sessions, get_cwd_fast, load_project_fast
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+    load_project_fast = None
+
 class CodexHistoryManager:
-    """Codex 历史记录管理器 - 使用 Rust 加速"""
     def __init__(self, codex_dir: Path):
         self.codex_dir = codex_dir
-        self.trash_manager = RustTrashManager('codex')
+        self.trash_manager = TrashManager(codex_dir)
+        self._cwd_cache = {}  # cwd -> mtime 缓存
+
+    def _get_cwd(self, f: Path) -> str:
+        if _USE_CYTHON:
+            return get_cwd_fast(str(f))
+        try:
+            with open(f, 'r', encoding='utf-8') as fp:
+                for line in fp:
+                    if '"cwd"' in line:
+                        data = json.loads(line)
+                        return data.get('payload', {}).get('cwd', '') or data.get('cwd', '')
+        except (OSError, json.JSONDecodeError):
+            pass
+        return ''
 
     def list_projects(self, with_cwd: bool = False, limit: int = 0, on_update=None) -> list:
-        projects = lh.list_projects('codex', limit if limit > 0 else 0)
+        """列出工作目录分组，使用 Cython 加速"""
+        sessions_dir = str(self.codex_dir / "sessions")
+        if _USE_CYTHON:
+            self._cwd_cache = scan_codex_sessions(sessions_dir, limit)
+        else:
+            # 纯 Python 回退
+            self._cwd_cache = self._scan_sessions_py(sessions_dir, limit)
+        sorted_cwds = sorted(self._cwd_cache.keys(), key=lambda x: self._cwd_cache[x], reverse=True)
+        if limit > 0:
+            sorted_cwds = sorted_cwds[:limit]
         if not with_cwd:
-            return [p.cwd or p.id for p in projects]
-        return [(p.cwd or p.id, p.cwd or p.id) for p in projects]
+            return sorted_cwds
+        return [(cwd, cwd) for cwd in sorted_cwds]
+
+    def _scan_sessions_py(self, sessions_dir: str, limit: int) -> dict:
+        """纯 Python 回退扫描"""
+        import os
+        cwd_map = {}
+        if not os.path.isdir(sessions_dir):
+            return cwd_map
+        count = 0
+        for year in sorted(os.listdir(sessions_dir), reverse=True):
+            yp = os.path.join(sessions_dir, year)
+            if not os.path.isdir(yp): continue
+            for month in sorted(os.listdir(yp), reverse=True):
+                mp = os.path.join(yp, month)
+                if not os.path.isdir(mp): continue
+                for day in sorted(os.listdir(mp), reverse=True):
+                    dp = os.path.join(mp, day)
+                    if not os.path.isdir(dp): continue
+                    for f in os.listdir(dp):
+                        if not f.endswith('.jsonl'): continue
+                        fp = os.path.join(dp, f)
+                        cwd = self._get_cwd(Path(fp)) or "未知目录"
+                        mtime = os.path.getmtime(fp)
+                        if cwd not in cwd_map:
+                            cwd_map[cwd] = mtime
+                            count += 1
+                            if limit > 0 and count >= limit:
+                                return cwd_map
+                        elif mtime > cwd_map[cwd]:
+                            cwd_map[cwd] = mtime
+        return cwd_map
 
     def load_project(self, cwd_path: str) -> dict:
-        sessions = lh.load_project('codex', cwd_path)
+        """加载指定工作目录的会话"""
+        sessions_dir = self.codex_dir / "sessions"
+        if not sessions_dir.exists():
+            return {}
+        # 使用 Cython 加速
+        if _USE_CYTHON and load_project_fast:
+            raw = load_project_fast(str(sessions_dir), cwd_path)
+            result = {}
+            for sid, info in raw.items():
+                result[sid] = {'file': Path(info['file']), 'last_timestamp': info['last_timestamp']}
+            return result
+        # 纯 Python 回退
         result = {}
-        for s in sessions:
-            full = lh.load_session('codex', s.file_path)
-            if full:
-                messages = self._convert_messages(full.messages)
-                result[s.id] = {
-                    'file': Path(s.file_path),
-                    'messages': messages,
-                    'message_count': s.message_count,
-                    'first_timestamp': s.first_timestamp,
-                    'last_timestamp': s.last_timestamp,
-                    'cwd': s.cwd,
-                    'size': s.file_size
-                }
-        return result
-
-    def _convert_messages(self, rust_messages) -> list:
-        result = []
-        for m in rust_messages:
-            text = m.get_text() if hasattr(m, 'get_text') else ''
-            result.append({
-                'role': m.role,
-                'content': text
-            })
+        for session_file in sessions_dir.rglob("*.jsonl"):
+            cwd = self._get_cwd(session_file)
+            if cwd != cwd_path and (not cwd and cwd_path != "未知目录"):
+                continue
+            session_id = session_file.stem.replace("rollout-", "")
+            info = self._parse_session(session_file)
+            if info:
+                result[session_id] = info
         return result
 
     def load_sessions(self, callback=None) -> dict:
-        """加载所有会话（用于预加载）"""
-        projects = self.list_projects(limit=0)
+        sessions_dir = self.codex_dir / "sessions"
         result = {}
-        for cwd in projects:
+        if not sessions_dir.exists():
+            return result
+        for session_file in sessions_dir.rglob("*.jsonl"):
             if callback:
-                callback(f"扫描: {cwd[:30]}...")
-            result[cwd] = self.load_project(cwd)
+                callback(f"扫描: {session_file.name[:30]}...")
+            parts = session_file.relative_to(sessions_dir).parts
+            if len(parts) >= 3:
+                date_group = f"{parts[0]}-{parts[1]}-{parts[2]}"
+            else:
+                date_group = "未知日期"
+            if date_group not in result:
+                result[date_group] = {}
+            session_id = session_file.stem.replace("rollout-", "")
+            info = self._parse_session(session_file)
+            if info:
+                result[date_group][session_id] = info
         return result
 
-    def delete_session(self, date_group: str, session_id: str, info: dict) -> bool:
+    def _parse_session(self, session_file: Path) -> dict | None:
         try:
-            lh.delete_session('codex', str(info['file']))
-            return True
-        except Exception:
-            return False
+            messages = []
+            first_ts, last_ts, cwd = None, None, None
+            with open(session_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        ts = data.get('timestamp')
+                        if ts:
+                            if not first_ts:
+                                first_ts = ts
+                            last_ts = ts
+                        if data.get('type') == 'session_meta':
+                            cwd = data.get('payload', {}).get('cwd')
+                        if data.get('type') == 'response_item':
+                            payload = data.get('payload', {})
+                            if payload.get('type') == 'message':
+                                messages.append(payload)
+                        elif data.get('type') == 'event_msg':
+                            payload = data.get('payload', {})
+                            if payload.get('type') in ('user_message', 'agent_message'):
+                                messages.append({'role': 'user' if 'user' in payload.get('type') else 'assistant',
+                                                'content': payload.get('message', '')})
+                    except json.JSONDecodeError:
+                        continue  # 跳过损坏的行
+            if not messages:
+                return None
+            return {
+                'file': session_file, 'messages': messages, 'message_count': len(messages),
+                'first_timestamp': first_ts, 'last_timestamp': last_ts, 'cwd': cwd,
+                'size': session_file.stat().st_size
+            }
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def delete_session(self, date_group: str, session_id: str, info: dict) -> bool:
+        return self.trash_manager.move_to_trash(session_id, date_group, info['file'])
 
     def export_to_markdown(self, session_id: str, info: dict) -> str:
-        try:
-            return lh.export_to_markdown('codex', str(info['file']))
-        except Exception:
-            return ''
+        lines = [f"# Codex 会话: {session_id}\n", f"路径: {info.get('cwd', '未知')}\n\n---\n\n"]
+        for msg in info['messages']:
+            role = msg.get('role', '未知')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                text = ""
+                for c in content:
+                    if isinstance(c, dict) and c.get('type') in ('input_text', 'output_text'):
+                        text += c.get('text', '')
+            else:
+                text = str(content)
+            lines.append(f"## {role.upper()}\n\n{text}\n\n---\n\n")
+        return ''.join(lines)
 
 
 # ========== 全局实例 ==========

@@ -100,19 +100,28 @@ def create_api_page(state):
     _tree_refs = {"cli": {}, "endpoint": {}, "config": {}}
     _last_click = {"config": None, "time": 0}  # 双击检测
 
-    # 终端和环境下拉
+    # 终端和环境下拉 - 优先使用上次选择的
+    last_terminal = state.settings.get('last_terminal', '')
+    last_env = state.settings.get('last_python_env', '')
     terminal_dropdown = ft.Dropdown(
         label=L['select_terminal'],
-        value=list(state.terminals.keys())[0] if state.terminals else '',
+        value=last_terminal if last_terminal in state.terminals else (list(state.terminals.keys())[0] if state.terminals else ''),
         options=[ft.dropdown.Option(k) for k in state.terminals.keys()],
         width=180,
+        on_change=lambda e: save_last_selection('last_terminal', e.control.value),
     )
     python_env_dropdown = ft.Dropdown(
         label=L['python_env'],
-        value=list(state.python_envs.keys())[0] if state.python_envs else '',
+        value=last_env if last_env in state.python_envs else (list(state.python_envs.keys())[0] if state.python_envs else ''),
         options=[ft.dropdown.Option(k) for k in state.python_envs.keys()],
         width=220,
+        on_change=lambda e: save_last_selection('last_python_env', e.control.value),
     )
+
+    def save_last_selection(key, value):
+        """保存上次选择到 settings"""
+        state.settings[key] = value
+        save_settings(state.settings)
 
     # 工作目录历史记录
     work_dir_history = state.settings.get('work_dir_history', [])
@@ -941,6 +950,19 @@ def create_api_page(state):
             terminal_dropdown.value = list(state.terminals.keys())[0]
         show_snackbar(page, L['terminals_refreshed'])
 
+    def delete_terminal_click(e):
+        """删除当前选中的终端"""
+        name = terminal_dropdown.value
+        if not name or name not in state.terminals:
+            return
+        del state.terminals[name]
+        state.settings['terminals_cache'] = state.terminals
+        save_settings(state.settings)
+        terminal_dropdown.options = [ft.dropdown.Option(k) for k in state.terminals.keys()]
+        terminal_dropdown.value = list(state.terminals.keys())[0] if state.terminals else ''
+        page.update()
+        show_snackbar(page, L.get('terminal_deleted', '已删除终端: {}').format(name))
+
     def refresh_envs_click(e):
         state.python_envs = detect_python_envs()
         state.settings['envs_cache'] = state.python_envs
@@ -949,6 +971,19 @@ def create_api_page(state):
         if state.python_envs:
             python_env_dropdown.value = list(state.python_envs.keys())[0]
         show_snackbar(page, L['envs_refreshed'].format(len(state.python_envs)))
+
+    def delete_env_click(e):
+        """删除当前选中的 Python 环境"""
+        name = python_env_dropdown.value
+        if not name or name not in state.python_envs:
+            return
+        del state.python_envs[name]
+        state.settings['envs_cache'] = state.python_envs
+        save_settings(state.settings)
+        python_env_dropdown.options = [ft.dropdown.Option(k) for k in state.python_envs.keys()]
+        python_env_dropdown.value = list(state.python_envs.keys())[0] if state.python_envs else ''
+        page.update()
+        show_snackbar(page, L.get('env_deleted', '已删除环境: {}').format(name))
 
     def open_terminal(e):
         if state.selected_config is None:
@@ -1372,8 +1407,10 @@ def create_api_page(state):
         ft.Text(L['terminal'], size=16, weight=ft.FontWeight.BOLD),
         ft.Row([
             terminal_dropdown,
+            ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip=L.get('delete_terminal', '删除终端'), on_click=delete_terminal_click),
             ft.TextButton(L['refresh_terminals'], icon=ft.Icons.REFRESH, on_click=refresh_terminals_click),
             python_env_dropdown,
+            ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip=L.get('delete_env', '删除环境'), on_click=delete_env_click),
             ft.TextButton(L['refresh_envs'], icon=ft.Icons.REFRESH, on_click=refresh_envs_click),
             ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),

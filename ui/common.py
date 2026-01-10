@@ -304,14 +304,28 @@ def save_settings(settings):
 def detect_terminals():
     terminals = {}
     if sys.platform == 'win32':
-        candidates = [
-            ('Windows Terminal', 'wt.exe'),
-            ('PowerShell', 'powershell.exe'),
-            ('CMD', 'cmd.exe'),
-        ]
-        for name, exe in candidates:
-            if shutil.which(exe):
-                terminals[name] = exe
+        # Windows Terminal 只是启动器，不作为独立终端
+        has_wt = shutil.which('wt.exe') is not None
+
+        # PowerShell 7 (pwsh) - 真正的终端
+        if shutil.which('pwsh.exe'):
+            terminals['PowerShell 7'] = 'wt:pwsh' if has_wt else 'pwsh'
+        # PowerShell 5 - 真正的终端
+        if shutil.which('powershell.exe'):
+            terminals['PowerShell 5'] = 'wt:powershell' if has_wt else 'powershell'
+        # CMD - 真正的终端
+        terminals['CMD'] = 'wt:cmd' if has_wt else 'cmd'
+        # Git Bash
+        bash_path = shutil.which('bash.exe')
+        if bash_path and 'git' in bash_path.lower():
+            terminals['Git Bash'] = bash_path
+        # WSL
+        try:
+            result = subprocess.run(['wsl', '--status'], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                terminals['WSL'] = 'wt:wsl' if has_wt else 'wsl'
+        except (subprocess.SubprocessError, OSError):
+            pass
     else:
         candidates = [
             ('GNOME Terminal', 'gnome-terminal'),
@@ -326,15 +340,25 @@ def detect_terminals():
 
 def detect_python_envs():
     envs = {}
+    base_entry = None  # 保存 base 环境，最后添加
     try:
         result = subprocess.run(['conda', 'env', 'list', '--json'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             data = json.loads(result.stdout)
             for env_path in data.get('envs', []):
                 env_name = Path(env_path).name
-                envs[f'conda: {env_name}'] = env_path
-    except:
+                # 判断是否为 base 环境（路径不包含 envs 子目录）
+                is_base = 'envs' not in env_path.lower()
+                if is_base:
+                    # base 环境显示为 "conda: base (目录名)"
+                    base_entry = (f'conda: base ({env_name})', env_path)
+                else:
+                    envs[f'conda: {env_name}'] = env_path
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
         pass
+    # base 放在最后
+    if base_entry:
+        envs[base_entry[0]] = base_entry[1]
     return envs
 
 def get_prompt_file_path(cli_type: str) -> Path:

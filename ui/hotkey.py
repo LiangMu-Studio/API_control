@@ -267,31 +267,43 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                     _show_toast("复制成功", f"已复制 {len(all_files)} 个文件:\n{paths}")
 
     def on_left_click():
+        """左键点击后检查是否新选中了文件"""
         global _grab_mode, _prev_selected
         if not _grab_mode:
             return
+
+        # 立即检查点击时的前台窗口（点击前的状态）
         was_explorer = _is_explorer_or_desktop()
-        # Shift/Ctrl 多选等待
+
+        # 如果 Shift/Ctrl 按住，等待释放（多选操作）
         while keyboard.is_pressed("shift") or keyboard.is_pressed("ctrl"):
             time.sleep(0.05)
         time.sleep(0.15)
+
+        # 再次检查当前前台窗口
         is_explorer_now = _is_explorer_or_desktop()
+
         if not is_explorer_now:
             return
+
         selected = set(_get_selected_files())
         new_selected = selected - _prev_selected
-        # 已在资源管理器点击：有选中就复制；从其他窗口切换：只复制新选中
+
+        # 如果点击前就在资源管理器，有选中就复制（用户明确点击）
+        # 如果是从其他窗口切换过来，只有新选中才复制
         if was_explorer:
             if selected:
                 threading.Thread(target=do_copy, daemon=True).start()
-        elif new_selected:
-            threading.Thread(target=do_copy, daemon=True).start()
+        else:
+            if new_selected:
+                threading.Thread(target=do_copy, daemon=True).start()
 
     def on_hotkey():
         global _grab_mode, _esc_hook, _prev_selected, _old_title
+
         if not _grab_mode:
             _grab_mode = True
-            _prev_selected = set(_get_selected_files())
+            _prev_selected = set(_get_selected_files())  # 记录当前已选中的文件
             _set_grab_cursor()
             if page:
                 try:
@@ -302,10 +314,11 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                     page.update()
                 except Exception:
                     pass
+            # 延迟注册监听，避免误触发
             def setup_hooks():
                 time.sleep(0.3)
                 if _grab_mode:
-                    mouse.on_click(lambda: on_left_click())
+                    mouse.on_click(on_left_click)
                     mouse.on_right_click(lambda: cancel_grab())
                     global _esc_hook
                     _esc_hook = keyboard.on_press_key("escape", lambda _: cancel_grab())

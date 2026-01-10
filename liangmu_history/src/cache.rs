@@ -65,6 +65,7 @@ fn init_db(cli_type: &str) -> rusqlite::Result<Connection> {
             project_id TEXT NOT NULL,
             session_id TEXT NOT NULL,
             message_count INTEGER NOT NULL,
+            user_turn_count INTEGER NOT NULL DEFAULT 0,
             first_timestamp TEXT,
             last_timestamp TEXT,
             file_mtime INTEGER NOT NULL,
@@ -88,6 +89,12 @@ fn init_db(cli_type: &str) -> rusqlite::Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_history_cwd ON history_cache(project_cwd);
         "
     )?;
+
+    // 添加 user_turn_count 列（如果不存在）- 兼容旧数据库
+    conn.execute(
+        "ALTER TABLE history_cache ADD COLUMN user_turn_count INTEGER NOT NULL DEFAULT 0",
+        [],
+    ).ok();
 
     Ok(conn)
 }
@@ -145,6 +152,7 @@ pub fn find_project_by_cwd_cached(cli_type: &str, cwd: &str) -> Option<Project> 
 }
 
 /// 从缓存加载项目会话列表
+/// 复刻 DEV 版的完整过滤规则
 pub fn load_project_from_cache(cli_type: &str, project_id: &str) -> Vec<SessionInfo> {
     if get_db(cli_type).is_err() {
         return Vec::new();
@@ -160,10 +168,17 @@ pub fn load_project_from_cache(cli_type: &str, project_id: &str) -> Vec<SessionI
         None => return Vec::new(),
     };
 
+    // 复刻 DEV 版过滤规则：
+    // 1. message_count > 1 (过滤空会话)
+    // 2. user_turn_count > 0 (过滤无用户消息的会话)
+    // 3. 有有效时间戳
     let mut stmt = match conn.prepare(
-        "SELECT session_id, file_path, message_count, first_timestamp, last_timestamp, project_cwd
+        "SELECT session_id, file_path, message_count, first_timestamp, last_timestamp, project_cwd, user_turn_count
          FROM history_cache
-         WHERE project_id = ? AND (first_timestamp IS NOT NULL OR last_timestamp IS NOT NULL)
+         WHERE project_id = ?
+           AND message_count > 1
+           AND user_turn_count > 0
+           AND (first_timestamp IS NOT NULL OR last_timestamp IS NOT NULL)
          ORDER BY last_timestamp DESC"
     ) {
         Ok(s) => s,
@@ -178,7 +193,7 @@ pub fn load_project_from_cache(cli_type: &str, project_id: &str) -> Vec<SessionI
             first_timestamp: row.get(3)?,
             last_timestamp: row.get(4)?,
             cwd: row.get(5)?,
-            user_turn_count: 0,
+            user_turn_count: row.get(6)?,
             file_size: 0,
         })
     })
@@ -193,6 +208,7 @@ pub fn update_cache_entry(
     project_id: &str,
     session_id: &str,
     message_count: usize,
+    user_turn_count: usize,
     first_timestamp: Option<&str>,
     last_timestamp: Option<&str>,
     file_mtime: i64,
@@ -204,9 +220,9 @@ pub fn update_cache_entry(
 
     conn.execute(
         "INSERT OR REPLACE INTO history_cache
-         (file_path, cli_type, project_id, session_id, message_count, first_timestamp, last_timestamp, file_mtime, project_cwd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params![file_path, cli_type, project_id, session_id, message_count, first_timestamp, last_timestamp, file_mtime, project_cwd],
+         (file_path, cli_type, project_id, session_id, message_count, user_turn_count, first_timestamp, last_timestamp, file_mtime, project_cwd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![file_path, cli_type, project_id, session_id, message_count, user_turn_count, first_timestamp, last_timestamp, file_mtime, project_cwd],
     )?;
 
     Ok(())

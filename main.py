@@ -6,13 +6,12 @@ import flet as ft
 import asyncio
 import sys
 import os
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
 
 # 单实例锁（Windows）
 if sys.platform == 'win32':
-    import ctypes
-    from ctypes import wintypes
-
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "AI_CLI_Manager_SingleInstance")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         # 使用 EnumWindows 查找窗口（更可靠）
@@ -38,7 +37,7 @@ if sys.platform == 'win32':
         sys.exit(0)
 from ui.state import AppState
 from ui.common import VERSION, save_settings, detect_terminals, detect_python_envs
-from ui.clipboard_paste import setup_clipboard_paste
+from ui.clipboard_paste import setup_clipboard_paste, cleanup_clipboard_paste
 from ui.theme_manager import ThemeManager
 
 # 获取图标路径（兼容打包后）
@@ -48,7 +47,7 @@ else:
     BASE_DIR = Path(__file__).parent
 ICON_PATH = str(BASE_DIR / "icon.ico")
 from ui.database import history_manager, codex_history_manager, history_cache
-from ui.hotkey import setup_screenshot_hotkey, setup_copypath_hotkey
+from ui.hotkey import setup_screenshot_hotkey, setup_copypath_hotkey, cleanup_hotkeys
 from ui.pages.api_keys import create_api_page
 from ui.pages.prompts import create_prompts_page
 from ui.pages.mcp import create_mcp_page
@@ -80,7 +79,9 @@ def main(page: ft.Page):
     def on_window_event(e):
         if e.data == "close":
             page.window.minimized = True
-            page.window.skip_task_bar = True
+            # 只有托盘存在时才隐藏任务栏图标
+            if _tray_icon:
+                page.window.skip_task_bar = True
             page.update()
 
     page.window.on_event = on_window_event
@@ -115,7 +116,11 @@ def main(page: ft.Page):
         _hwnd_cache[0] = hwnd
         if hwnd:
             ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
-        page.window.skip_task_bar = True
+        # 只有托盘存在时才隐藏任务栏图标
+        if _tray_icon:
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+            page.window.skip_task_bar = True
         page.update()
 
     def do_minimize(_):
@@ -229,7 +234,7 @@ def main(page: ft.Page):
 
     main_content = ft.Row([nav_rail, divider, content_area], expand=True)
     page.add(ft.Column([title_bar, main_content], spacing=0, expand=True))
-    refresh_api()
+    # 注：不需要调用 refresh_api()，create_api_page 内部已完成初始化
 
     # 后台预加载历史
     async def preload_history():
@@ -273,14 +278,18 @@ def main(page: ft.Page):
 
         def show_window():
             def do_show():
+                hwnd = _hwnd_cache[0] or get_hwnd()
+                _hwnd_cache[0] = hwnd
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
                 page.window.skip_task_bar = False
-                page.window.minimized = False
-                page.window.visible = True
-                page.window.focused = True
                 page.update()
             page.run_thread(do_show)
 
         def quit_app():
+            cleanup_hotkeys()  # 清理热键钩子
+            cleanup_clipboard_paste()  # 清理剪贴板钩子
             page.window.prevent_close = False  # 允许关闭
             stop_tray(_tray_icon)
             page.window.close()
@@ -297,8 +306,8 @@ def main(page: ft.Page):
 
         _tray_icon = create_tray_icon(state, show_window, quit_app, tray_screenshot, tray_copy_path)
         run_tray_in_background(_tray_icon)
-    except Exception as e:
-        print(f"[Tray] 托盘图标启动失败: {e}")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

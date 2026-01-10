@@ -36,6 +36,7 @@ _state = {
     'click_button': None,
     'listener': None,
     'enabled': False,
+    'keyboard_hook': None,  # 保存钩子引用以便清理
 }
 
 
@@ -43,14 +44,15 @@ def _get_clipboard():
     """获取剪贴板文本内容"""
     try:
         ctypes.windll.user32.OpenClipboard(0)
-        h = ctypes.windll.user32.GetClipboardData(13)
-        if h:
-            ctypes.windll.kernel32.GlobalLock.restype = ctypes.c_wchar_p
-            txt = ctypes.windll.kernel32.GlobalLock(h)
-            ctypes.windll.kernel32.GlobalUnlock(h)
+        try:
+            h = ctypes.windll.user32.GetClipboardData(13)
+            if h:
+                ctypes.windll.kernel32.GlobalLock.restype = ctypes.c_wchar_p
+                txt = ctypes.windll.kernel32.GlobalLock(h)
+                ctypes.windll.kernel32.GlobalUnlock(h)
+                return txt
+        finally:
             ctypes.windll.user32.CloseClipboard()
-            return txt
-        ctypes.windll.user32.CloseClipboard()
     except Exception:
         pass
     return None
@@ -217,7 +219,17 @@ def setup_clipboard_paste(page):
         if event.event_type == 'down' and event.name == 'v':
             if keyboard.is_pressed('win') or keyboard.is_pressed('left windows') or keyboard.is_pressed('right windows'):
                 threading.Thread(target=_on_winv, daemon=True).start()
-    keyboard.hook(_keyboard_hook)
+    _state['keyboard_hook'] = keyboard.hook(_keyboard_hook)
+
+
+def cleanup_clipboard_paste():
+    """清理键盘钩子"""
+    if _state.get('keyboard_hook'):
+        try:
+            keyboard.unhook(_state['keyboard_hook'])
+        except Exception:
+            pass
+        _state['keyboard_hook'] = None
 
 
 def enable_clipboard_paste(field):

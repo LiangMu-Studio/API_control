@@ -191,7 +191,14 @@ impl CodexProvider {
     }
 
     /// 快速解析会话信息
+    /// 复刻 DEV 版的完整过滤规则
     fn parse_session_info(&self, file_path: &Path) -> Option<SessionInfo> {
+        // [过滤1] 空文件过滤
+        let file_size = fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        if file_size == 0 {
+            return None;
+        }
+
         let file = File::open(file_path).ok()?;
         let reader = BufReader::new(file);
 
@@ -246,11 +253,21 @@ impl CodexProvider {
             }
         }
 
+        // [过滤2] 无消息过滤
         if msg_count == 0 {
             return None;
         }
 
-        let file_size = fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        // [过滤3] 无有效时间戳过滤
+        if first_ts.is_none() && last_ts.is_none() {
+            return None;
+        }
+
+        // [过滤4] 用户消息为0过滤
+        if user_turn_count == 0 {
+            return None;
+        }
+
         let session_id = file_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -382,7 +399,7 @@ impl CliHistoryProvider for CodexProvider {
             .map(|e| e.path().to_path_buf())
             .collect();
 
-        // 并行过滤和解析
+        // 并行过滤和解析，过滤掉 <=1 轮的无效会话
         let mut sessions: Vec<SessionInfo> = files
             .par_iter()
             .filter_map(|file_path| {
@@ -392,6 +409,7 @@ impl CliHistoryProvider for CodexProvider {
                 }
                 self.parse_session_info(file_path)
             })
+            .filter(|s| s.user_turn_count > 1)  // 复刻 DEV 版：过滤 <=1 轮会话
             .collect();
 
         sessions.sort_by(|a, b| b.last_timestamp.as_ref().cmp(&a.last_timestamp.as_ref()));

@@ -57,11 +57,19 @@ DATAS = [
     ('mcp_data', 'mcp_data'),
 ]
 
+# 排除的模块（避免冲突）
+EXCLUDES = [
+    'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+    'tkinter', '_tkinter',
+    'matplotlib', 'numpy', 'pandas', 'scipy',
+    'PIL', 'cv2', 'torch', 'tensorflow',
+]
+
 # 打包配置
 CONFIG = {
-    'name': 'LiangMu-API-Key',
+    'name': 'AI-CLI-Manager',
     'icon': 'icon.ico',
-    'entry': 'app_flet.py',
+    'entry': 'main.py',
     'onefile': True,
     'windowed': True,
     'console': False,  # 改为 True 可调试
@@ -79,6 +87,11 @@ def build():
     for src, dst in DATAS:
         data_args.extend(['--add-data', f'{src};{dst}'])
 
+    # 构建 excludes 参数
+    exclude_args = []
+    for mod in EXCLUDES:
+        exclude_args.extend(['--exclude-module', mod])
+
     cmd = [
         sys.executable, '-m', 'PyInstaller',
         '--name', CONFIG['name'],
@@ -95,6 +108,7 @@ def build():
 
     cmd.extend(hidden_args)
     cmd.extend(data_args)
+    cmd.extend(exclude_args)
     cmd.append(CONFIG['entry'])
 
     print('=' * 60)

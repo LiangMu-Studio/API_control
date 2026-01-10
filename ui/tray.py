@@ -60,7 +60,12 @@ def create_tray_icon(state, on_show_window, on_quit, on_screenshot=None, on_copy
 def run_tray_in_background(icon):
     """在后台线程运行托盘图标"""
     if icon:
-        thread = threading.Thread(target=icon.run, daemon=True)
+        def run_with_error_handling():
+            try:
+                icon.run()
+            except Exception as e:
+                print(f"[Tray] 托盘运行错误: {e}")
+        thread = threading.Thread(target=run_with_error_handling, daemon=True)
         thread.start()
         return thread
     return None

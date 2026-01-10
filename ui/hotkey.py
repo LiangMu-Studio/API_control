@@ -26,6 +26,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "data" / "hotkey.json"
 DEFAULT_SCREENSHOT_HOTKEY = "alt+s"
 DEFAULT_COPYPATH_HOTKEY = "alt+c"
 
+_lock = threading.Lock()
 _current_screenshot_hotkey = None
 _current_copypath_hotkey = None
 _grab_mode = False
@@ -121,14 +122,15 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
                     _set_clipboard(path)
         threading.Thread(target=run, daemon=True).start()
 
-    if _current_screenshot_hotkey:
-        try:
-            keyboard.remove_hotkey(_current_screenshot_hotkey)
-        except Exception:
-            pass
+    with _lock:
+        if _current_screenshot_hotkey:
+            try:
+                keyboard.remove_hotkey(_current_screenshot_hotkey)
+            except Exception:
+                pass
 
-    keyboard.add_hotkey(hotkey, take_screenshot)
-    _current_screenshot_hotkey = hotkey
+        keyboard.add_hotkey(hotkey, take_screenshot)
+        _current_screenshot_hotkey = hotkey
 
 
 def _get_all_files(path: Path) -> list:
@@ -268,40 +270,29 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
         global _grab_mode, _prev_selected
         if not _grab_mode:
             return
-        # 点击前检查是否已在资源管理器
         was_explorer = _is_explorer_or_desktop()
-        print(f"[DEBUG] 前台窗口检查: was_explorer={was_explorer}")
         # Shift/Ctrl 多选等待
         while keyboard.is_pressed("shift") or keyboard.is_pressed("ctrl"):
             time.sleep(0.05)
         time.sleep(0.15)
-        # 再次检查当前前台窗口
         is_explorer_now = _is_explorer_or_desktop()
-        print(f"[DEBUG] 当前窗口检查: is_explorer_now={is_explorer_now}")
         if not is_explorer_now:
-            print("[DEBUG] 当前不是资源管理器/桌面，忽略")
             return
         selected = set(_get_selected_files())
         new_selected = selected - _prev_selected
-        print(f"[DEBUG] was_explorer={was_explorer}, prev={len(_prev_selected)}, now={len(selected)}, new={len(new_selected)}")
         # 已在资源管理器点击：有选中就复制；从其他窗口切换：只复制新选中
         if was_explorer:
             if selected:
-                print("[DEBUG] 触发复制 (was_explorer + selected)")
                 threading.Thread(target=do_copy, daemon=True).start()
         elif new_selected:
-            print("[DEBUG] 触发复制 (new_selected)")
             threading.Thread(target=do_copy, daemon=True).start()
 
     def on_hotkey():
         global _grab_mode, _esc_hook, _prev_selected, _old_title
-        print(f"[DEBUG] on_hotkey called, _grab_mode={_grab_mode}")
         if not _grab_mode:
             _grab_mode = True
             _prev_selected = set(_get_selected_files())
-            print(f"[DEBUG] 记录已选中文件: {len(_prev_selected)} 个")
             _set_grab_cursor()
-            print("[DEBUG] 光标已替换，进入抓取模式")
             if page:
                 try:
                     _old_title = page.title
@@ -318,17 +309,17 @@ def setup_copypath_hotkey(hotkey: str = None, page=None):
                     mouse.on_right_click(lambda: cancel_grab())
                     global _esc_hook
                     _esc_hook = keyboard.on_press_key("escape", lambda _: cancel_grab())
-                    print("[DEBUG] 鼠标/键盘钩子已注册")
             threading.Thread(target=setup_hooks, daemon=True).start()
 
-    if _current_copypath_hotkey:
-        try:
-            keyboard.remove_hotkey(_current_copypath_hotkey)
-        except Exception:
-            pass
+    with _lock:
+        if _current_copypath_hotkey:
+            try:
+                keyboard.remove_hotkey(_current_copypath_hotkey)
+            except Exception:
+                pass
 
-    keyboard.add_hotkey(hotkey, on_hotkey)
-    _current_copypath_hotkey = hotkey
+        keyboard.add_hotkey(hotkey, on_hotkey)
+        _current_copypath_hotkey = hotkey
 
 
 def update_hotkey(new_hotkey: str, save_dir: str = None, page=None):
@@ -341,3 +332,29 @@ def update_copypath_hotkey(new_hotkey: str):
     """更新复制路径快捷键"""
     save_hotkey("copy_path", new_hotkey)
     setup_copypath_hotkey(new_hotkey)
+
+
+def cleanup_hotkeys():
+    """清理所有热键钩子"""
+    global _current_screenshot_hotkey, _current_copypath_hotkey
+    if not HAS_KEYBOARD:
+        return
+    with _lock:
+        if _current_screenshot_hotkey:
+            try:
+                keyboard.remove_hotkey(_current_screenshot_hotkey)
+            except Exception:
+                pass
+            _current_screenshot_hotkey = None
+        if _current_copypath_hotkey:
+            try:
+                keyboard.remove_hotkey(_current_copypath_hotkey)
+            except Exception:
+                pass
+            _current_copypath_hotkey = None
+    # 清理所有钩子
+    try:
+        keyboard.unhook_all()
+        mouse.unhook_all()
+    except Exception:
+        pass

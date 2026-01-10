@@ -171,7 +171,14 @@ impl ClaudeProvider {
     }
 
     /// 快速解析会话信息（不加载全部消息）
+    /// 复刻 DEV 版的完整过滤规则
     fn parse_session_info(&self, file_path: &Path) -> Option<SessionInfo> {
+        // [过滤1] 空文件过滤
+        let file_size = fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        if file_size == 0 {
+            return None;
+        }
+
         let file = File::open(file_path).ok()?;
         let reader = BufReader::new(file);
 
@@ -186,6 +193,11 @@ impl ClaudeProvider {
                 Ok(l) if !l.trim().is_empty() => l,
                 _ => continue,
             };
+
+            // [过滤2] 系统中断消息过滤
+            if line.contains("[Request interrupted by user") {
+                continue;
+            }
 
             let data: Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
@@ -208,7 +220,7 @@ impl ClaudeProvider {
             if msg_type == Some("user") || msg_type == Some("assistant") {
                 msg_count += 1;
                 if msg_type == Some("user") {
-                    // 检查是否为真实用户输入
+                    // 检查是否为真实用户输入（伪用户消息过滤）
                     let content = data
                         .get("message")
                         .and_then(|m| m.get("content"));
@@ -223,11 +235,20 @@ impl ClaudeProvider {
             }
         }
 
+        // [过滤3] 无消息过滤
         if msg_count == 0 {
             return None;
         }
 
-        let file_size = fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        // [过滤4] 无有效时间戳过滤
+        if first_ts.is_none() && last_ts.is_none() {
+            return None;
+        }
+
+        // [过滤5] 用户消息为0过滤
+        if user_turn_count == 0 {
+            return None;
+        }
 
         Some(SessionInfo {
             id: file_path
@@ -337,13 +358,18 @@ impl CliHistoryProvider for ClaudeProvider {
             .flatten()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map(|ext| ext == "jsonl").unwrap_or(false))
+            .filter(|e| {
+                // 复刻 DEV 版：过滤 agent- 开头的子任务文件
+                !e.file_name().to_string_lossy().starts_with("agent-")
+            })
             .map(|e| e.path())
             .collect();
 
-        // 并行解析
+        // 并行解析，过滤掉 <=1 轮的无效会话
         let mut sessions: Vec<SessionInfo> = files
             .par_iter()
             .filter_map(|f| self.parse_session_info(f))
+            .filter(|s| s.user_turn_count > 1)  // 复刻 DEV 版：过滤 <=1 轮会话
             .collect();
 
         // 按最后时间戳排序

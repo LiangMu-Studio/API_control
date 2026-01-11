@@ -215,6 +215,72 @@ def create_api_page(state):
         )
         page.open(dlg)
 
+    def clear_empty_sessions(e):
+        """清理空会话（0轮对话，通常由 CLEAR 命令产生）"""
+        cli_type = get_selected_cli_type()
+
+        def do_clear(_):
+            page.close(dlg)
+            deleted_count = 0
+
+            try:
+                if lh is not None:
+                    # 使用 Rust 模块获取所有会话，过滤并删除空会话
+                    all_sessions = []
+                    if cli_type == 'claude' and history_manager:
+                        projects = history_manager.list_projects()
+                        for p in projects:
+                            sessions = lh.load_project(cli_type, p)
+                            all_sessions.extend(sessions)
+                    elif cli_type == 'codex' and codex_history_manager:
+                        projects = codex_history_manager.list_projects()
+                        for p in projects:
+                            sessions = lh.load_project(cli_type, p)
+                            all_sessions.extend(sessions)
+
+                    for s in all_sessions:
+                        turns = getattr(s, 'user_turn_count', 0)
+                        if turns == 0:
+                            fpath = getattr(s, 'file_path', '')
+                            if fpath:
+                                try:
+                                    lh.delete_session(cli_type, fpath)
+                                    deleted_count += 1
+                                except Exception:
+                                    pass
+                else:
+                    # 回退到 Python 实现
+                    hm = codex_history_manager if cli_type == 'codex' else history_manager
+                    if hm:
+                        projects = hm.list_projects()
+                        for p in projects:
+                            sessions = hm.load_project(p) or []
+                            for s in sessions:
+                                turns = s.get('user_turn_count', s.get('message_count', 0))
+                                if turns == 0:
+                                    fpath = s.get('file_path', '')
+                                    if fpath:
+                                        try:
+                                            import os
+                                            os.remove(fpath)
+                                            deleted_count += 1
+                                        except Exception:
+                                            pass
+
+                show_snackbar(page, L.get('empty_sessions_cleared', '已清理 {} 个空会话').format(deleted_count))
+                # 刷新会话列表
+                refresh_session_dropdown_async(force_refresh=True)
+            except Exception as ex:
+                print(f"[clear_empty_sessions] 错误: {ex}")
+                show_snackbar(page, f"清理失败: {ex}")
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('confirm_clear', '确认清理')),
+            content=ft.Text(L.get('confirm_clear_empty_sessions', '是否要清理所有空会话（0轮对话）？\n这些通常是使用 /clear 命令后残留的文件。')),
+            actions=[ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: page.close(dlg)), ft.TextButton(L.get('confirm', '确认'), on_click=do_clear)]
+        )
+        page.open(dlg)
+
     # 会话恢复下拉框
     def get_selected_cli_type():
         """获取当前选中 KEY 的 cli_type"""
@@ -1684,7 +1750,8 @@ def create_api_page(state):
             ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),
         ft.Row([work_dir_input, work_dir_menu, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
-                ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history)]),
+                ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history),
+                ft.IconButton(ft.Icons.CLEANING_SERVICES, tooltip=L.get('clear_empty_sessions', '清理空会话(0轮)'), on_click=clear_empty_sessions)]),
         ft.Row([session_dropdown, session_preview_btn, ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
         ft.Row([
             prompt_dropdown,

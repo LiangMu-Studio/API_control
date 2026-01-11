@@ -238,6 +238,9 @@ LANG = {
         'token_limit': '上下文窗口',
         'screenshot_tooltip': '截图保留一周',
         'pick_path_tooltip': '选择文件复制绝对路径',
+        'clear_empty_sessions': '清理空会话(0轮)',
+        'confirm_clear_empty_sessions': '是否要清理所有空会话（0轮对话）？\n这些通常是使用 /clear 命令后残留的文件。',
+        'empty_sessions_cleared': '已清理 {} 个空会话',
     },
     'en': {
         'title': 'AI CLI Manager v{}',
@@ -478,5 +481,8 @@ LANG = {
         'token_limit': 'Context Window',
         'screenshot_tooltip': 'Screenshots kept for 1 week',
         'pick_path_tooltip': 'Select file to copy absolute path',
+        'clear_empty_sessions': 'Clear Empty Sessions',
+        'confirm_clear_empty_sessions': 'Clear all empty sessions (0 turns)?\nThese are usually left by /clear command.',
+        'empty_sessions_cleared': 'Cleared {} empty sessions',
     }
 }

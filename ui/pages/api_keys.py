@@ -279,15 +279,21 @@ def create_api_page(state):
                     ts = (s.last_timestamp or '')[:16].replace('T', ' ')
                     sid = s.id
                     fpath = s.file_path
+                    turns = getattr(s, 'user_turn_count', 0)
                 else:
                     ts = (s.get('last_timestamp') or '')[:16].replace('T', ' ')
                     sid = s.get('id', '')
                     fpath = s.get('file_path', '')
+                    turns = s.get('user_turn_count', s.get('message_count', 0))
 
+                # 格式: 时间 | 轮数 | ID
+                turn_text = f"{turns}轮" if turns else ""
                 if cli_type == 'codex':
-                    opts.append(ft.dropdown.Option(key=fpath, text=f"{ts} | {sid[:12]}"[:50]))
+                    display = f"{ts} | {turn_text} | {sid[:12]}" if turn_text else f"{ts} | {sid[:12]}"
+                    opts.append(ft.dropdown.Option(key=fpath, text=display[:50]))
                 else:
-                    opts.append(ft.dropdown.Option(key=sid, text=f"{ts} | {sid[:12]}"[:50]))
+                    display = f"{ts} | {turn_text} | {sid[:12]}" if turn_text else f"{ts} | {sid[:12]}"
+                    opts.append(ft.dropdown.Option(key=sid, text=display[:50]))
                     if not state._current_project:
                         state._current_project = sid  # 记录用于预览
 

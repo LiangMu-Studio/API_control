@@ -7,6 +7,12 @@ from pathlib import Path
 from ..common import THEMES, TRASH_RETENTION_DAYS, show_snackbar
 from ..database import history_manager, codex_history_manager
 
+# 导入 Rust 历史记录模块
+try:
+    import liangmu_history as lh
+except ImportError:
+    lh = None
+
 MAX_CACHE_SIZE = 50
 
 
@@ -535,6 +541,60 @@ def create_history_page(state):
 
     stats_text = ft.Text('', size=12, color=ft.Colors.GREY_600)
 
+    def clear_empty_sessions(_):
+        """清理空会话（0轮对话，通常由 /clear 命令产生）"""
+        def do_clear(_):
+            state.page.close(dlg)
+            deleted_count = 0
+
+            try:
+                mgr = get_current_manager()
+                if lh is not None and mgr:
+                    # 使用 Rust 模块获取所有会话
+                    projects = mgr.list_projects()
+                    for p in projects:
+                        sessions = lh.load_project(current_cli, p)
+                        for s in sessions:
+                            turns = getattr(s, 'user_turn_count', 0)
+                            if turns == 0:
+                                fpath = getattr(s, 'file_path', '')
+                                if fpath:
+                                    try:
+                                        lh.delete_session(current_cli, fpath)
+                                        deleted_count += 1
+                                    except Exception:
+                                        pass
+                elif mgr:
+                    # 回退到 Python 实现
+                    projects = mgr.list_projects()
+                    for p in projects:
+                        sessions = mgr.load_project(p) or []
+                        for s in sessions:
+                            turns = s.get('user_turn_count', s.get('message_count', 0))
+                            if turns == 0:
+                                fpath = s.get('file_path', '')
+                                if fpath:
+                                    try:
+                                        import os
+                                        os.remove(fpath)
+                                        deleted_count += 1
+                                    except Exception:
+                                        pass
+
+                show_snackbar(state.page, L.get('empty_sessions_cleared', '已清理 {} 个空会话').format(deleted_count))
+                # 刷新列表
+                refresh_project_list()
+            except Exception as ex:
+                print(f"[clear_empty_sessions] 错误: {ex}")
+                show_snackbar(state.page, f"清理失败: {ex}")
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('confirm_clear', '确认清理')),
+            content=ft.Text(L.get('confirm_clear_empty_sessions', '是否要清理所有空会话（0轮对话）？\n这些通常是使用 /clear 命令后残留的文件。')),
+            actions=[ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: state.page.close(dlg)), ft.TextButton(L.get('confirm', '确认'), on_click=do_clear)]
+        )
+        state.page.open(dlg)
+
     def show_trash(_):
         """显示回收站"""
         import time
@@ -630,6 +690,7 @@ def create_history_page(state):
             ft.TextButton(L.get('refresh', '刷新'), icon=ft.Icons.REFRESH, on_click=lambda _: refresh_project_list()),
             stats_text,
             ft.Container(expand=True),
+            ft.TextButton(L.get('clear_empty_sessions', '清理空会话'), icon=ft.Icons.CLEANING_SERVICES, on_click=clear_empty_sessions),
             ft.TextButton(L.get('history_trash', '回收站'), icon=ft.Icons.DELETE_OUTLINE, on_click=show_trash),
         ], spacing=12),
         # 主内容区

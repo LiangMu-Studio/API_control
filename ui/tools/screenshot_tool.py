@@ -22,13 +22,14 @@ def load_config() -> dict:
                 return json.load(f)
     except:
         pass
-    return {"color": "#ff0000", "width": 3}
+    return {"width": 3}
 
-def save_config(color: str, width: int):
+def save_config(width: int):
+    """只保存线条粗细，颜色不记忆"""
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump({"color": color, "width": width}, f)
+            json.dump({"width": width}, f)
     except:
         pass
 
@@ -88,10 +89,10 @@ class ScreenshotTool:
         self.undo_stack: List[Annotation] = []
         self.selected_index = -1  # 选中的标注索引
 
-        # 加载保存的设置
+        # 加载保存的设置（只有粗细，颜色每次默认红色）
         config = load_config()
         self.current_tool = ToolType.NONE
-        self.current_color = config.get("color", "#ff0000")
+        self.current_color = "#ff0000"  # 默认红色，不记忆
         self.current_width = config.get("width", 3)
         self.drawing = False
         self.draw_start = None
@@ -424,10 +425,10 @@ class ScreenshotTool:
                            command=lambda c=color: self._set_color(c))
             btn.pack(side=tk.LEFT, padx=1, pady=4)
 
-        # 自定义颜色
-        self.color_btn = tk.Button(self.toolbar_frame, text="...", width=2, height=1,
-                                   bg=self.current_color, fg="white", relief=tk.FLAT,
-                                   font=("Arial", 16), command=self._pick_color)
+        # 色盘按钮（彩色图标，不随选择变化）
+        self.color_btn = tk.Button(self.toolbar_frame, text="\U0001F3A8", width=2, height=1,
+                                   bg="#333333", fg="white", relief=tk.FLAT,
+                                   font=("Segoe UI Emoji", 14), command=self._pick_color)
         self.color_btn.pack(side=tk.LEFT, padx=2, pady=4)
 
         # 分隔
@@ -483,14 +484,12 @@ class ScreenshotTool:
     def _set_color(self, color: str):
         """设置颜色，更新选中或最后一个标注"""
         self.current_color = color
-        if self.color_btn:
-            self.color_btn.configure(bg=color)
+        # 色盘按钮保持彩色图标，不改变背景
         if self.selected_index >= 0:
             self.annotations[self.selected_index].color = color
         elif self.annotations:
             self.annotations[-1].color = color
         self._draw_all()
-        save_config(self.current_color, self.current_width)
 
     def _pick_color(self):
         color = colorchooser.askcolor(color=self.current_color)[1]
@@ -505,7 +504,7 @@ class ScreenshotTool:
             elif self.annotations:
                 self.annotations[-1].width = self.current_width
             self._draw_all()
-            save_config(self.current_color, self.current_width)
+            save_config(self.current_width)  # 只保存粗细
         except:
             pass
 

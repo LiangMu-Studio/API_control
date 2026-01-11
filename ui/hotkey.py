@@ -89,15 +89,18 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
     """注册截图全局快捷键"""
     global _current_screenshot_hotkey
     if not HAS_KEYBOARD:
+        print("[Screenshot] keyboard 模块未安装")
         return
 
     hotkey = hotkey or load_hotkey("screenshot")
+    print(f"[Screenshot] 注册快捷键: {hotkey}")
     script = str(Path(__file__).parent / "tools" / "screenshot_tool.py")
     # 默认截图目录
     if not save_dir:
         save_dir = str(Path(__file__).parent.parent / "screenshots")
 
     def take_screenshot():
+        print("[Screenshot] 快捷键触发!")
         old_title = None
         if page:
             try:
@@ -108,17 +111,24 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
             except Exception:
                 pass
 
-        def run():
+        def run(saved_title=old_title):
+            print(f"[Screenshot] 执行: {sys.executable} {script} {save_dir}")
             result = subprocess.run(
                 [sys.executable, script, save_dir or ""],
                 capture_output=True, text=True, check=False
             )
-            if page and old_title:
+            print(f"[Screenshot] 返回码: {result.returncode}")
+            print(f"[Screenshot] stdout: {result.stdout}")
+            print(f"[Screenshot] stderr: {result.stderr}")
+            # 无论成功还是取消，都恢复标题
+            if page:
                 try:
-                    page.title = old_title
+                    if saved_title:
+                        page.title = saved_title
                     page.update()
-                except Exception:
-                    pass
+                    print(f"[Screenshot] 标题已恢复: {saved_title}")
+                except Exception as e:
+                    print(f"[Screenshot] 恢复标题失败: {e}")
             # 复制截图路径到剪贴板
             if result.returncode == 0:
                 path = result.stdout.strip()
@@ -135,6 +145,7 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
 
         keyboard.add_hotkey(hotkey, take_screenshot)
         _current_screenshot_hotkey = hotkey
+        print(f"[Screenshot] 快捷键注册完成: {hotkey}")
 
 
 def _get_all_files(path: Path) -> list:
@@ -164,26 +175,55 @@ def _set_clipboard(text: str):
 
 
 def _show_toast(title: str, msg: str, timeout_ms: int = 2000):
-    """显示提示框，自动关闭，置顶显示，使用软件图标"""
+    """显示现代风格的提示框，自动关闭，置顶显示"""
     def show():
         import tkinter as tk
         root = tk.Tk()
-        root.title(title)
+        root.title("")
+        root.overrideredirect(True)  # 无边框
         root.attributes('-topmost', True)
-        # 设置图标
-        icon_path = Path(__file__).parent.parent / "icon.ico"
-        if icon_path.exists():
-            root.iconbitmap(str(icon_path))
-        # 内容 - 增加行距
+        root.attributes('-alpha', 0.95)  # 轻微透明
+
+        # 深色背景容器
+        bg_color = "#2d2d30"
+        text_color = "#ffffff"
+        title_color = "#4fc3f7"  # 浅蓝色标题
+
+        frame = tk.Frame(root, bg=bg_color, padx=20, pady=15)
+        frame.pack(fill='both', expand=True)
+
+        # 标题
+        tk.Label(frame, text=title, font=("Microsoft YaHei", 12, "bold"),
+                fg=title_color, bg=bg_color).pack(anchor='w')
+
+        # 分隔线
+        tk.Frame(frame, height=1, bg="#4a4a4a").pack(fill='x', pady=8)
+
+        # 内容
         lines = msg.split('\n')
-        for line in lines:
-            tk.Label(root, text=line, padx=20, pady=3, justify='left', anchor='w').pack(fill='x')
-        # 居中显示
+        for line in lines[:12]:  # 最多显示12行
+            tk.Label(frame, text=line, font=("Microsoft YaHei", 10),
+                    fg=text_color, bg=bg_color, justify='left', anchor='w').pack(fill='x', pady=1)
+
+        # 更新尺寸并居中
         root.update_idletasks()
         w, h = root.winfo_width(), root.winfo_height()
         x = (root.winfo_screenwidth() - w) // 2
         y = (root.winfo_screenheight() - h) // 2
         root.geometry(f'+{x}+{y}')
+
+        # 圆角效果（Windows 11）
+        try:
+            from ctypes import windll, byref, c_int
+            DWMWA_WINDOW_CORNER_PREFERENCE = 33
+            DWM_WINDOW_CORNER_PREFERENCE_ROUND = 2
+            windll.dwmapi.DwmSetWindowAttribute(
+                windll.user32.GetParent(root.winfo_id()),
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                byref(c_int(DWM_WINDOW_CORNER_PREFERENCE_ROUND)), 4)
+        except Exception:
+            pass
+
         # 自动关闭
         root.after(timeout_ms, root.destroy)
         root.mainloop()

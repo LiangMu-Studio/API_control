@@ -264,9 +264,13 @@ def main(page: ft.Page):
         threading.Thread(target=run, daemon=True).start()
     check_for_updates()
 
-    # 注册截图快捷键 Ctrl+Alt+A
-    setup_screenshot_hotkey(page=page)
-    setup_copypath_hotkey(page=page)
+    # 延迟注册快捷键，确保窗口完全初始化
+    def setup_hotkeys():
+        import time
+        time.sleep(0.5)  # 等待窗口完全初始化
+        setup_screenshot_hotkey(page=page)
+        setup_copypath_hotkey(page=page)
+    threading.Thread(target=setup_hotkeys, daemon=True).start()
 
     # 注册 Win+V 剪贴板粘贴支持
     setup_clipboard_paste(page)

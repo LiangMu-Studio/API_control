@@ -303,10 +303,11 @@ class ScreenshotTool:
         x1, y1, x2, y2 = self._get_selection_rect()
 
         w, h = self.screenshot_image.size
-        self.canvas.create_rectangle(0, 0, w, y1, fill="black", stipple="gray50", tags="overlay")
-        self.canvas.create_rectangle(0, y2, w, h, fill="black", stipple="gray50", tags="overlay")
-        self.canvas.create_rectangle(0, y1, x1, y2, fill="black", stipple="gray50", tags="overlay")
-        self.canvas.create_rectangle(x2, y1, w, y2, fill="black", stipple="gray50", tags="overlay")
+        # 遮罩区域（无边框，避免延长线）
+        self.canvas.create_rectangle(0, 0, w, y1, fill="black", stipple="gray50", outline="", tags="overlay")
+        self.canvas.create_rectangle(0, y2, w, h, fill="black", stipple="gray50", outline="", tags="overlay")
+        self.canvas.create_rectangle(0, y1, x1, y2, fill="black", stipple="gray50", outline="", tags="overlay")
+        self.canvas.create_rectangle(x2, y1, w, y2, fill="black", stipple="gray50", outline="", tags="overlay")
 
         self.canvas.create_rectangle(x1, y1, x2, y2, outline="#00aeff", width=2, tags="overlay")
         self.canvas.create_text(x1, y1 - 5, text=f"{x2-x1} x {y2-y1}",
@@ -388,15 +389,11 @@ class ScreenshotTool:
 
     def _create_toolbar(self):
         x1, y1, x2, y2 = self._get_selection_rect()
+        screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
 
-        if screen_h - y2 < 60:
-            toolbar_y = y2 - 50
-        else:
-            toolbar_y = y2 + 8
-
+        # 先创建工具栏获取实际宽度
         self.toolbar_frame = tk.Frame(self.root, bg="#333333")
-        self.toolbar_frame.place(x=x1, y=toolbar_y)
 
         tools = [
             ("\u2b1c", ToolType.RECT, "矩形"),
@@ -470,6 +467,24 @@ class ScreenshotTool:
         tk.Button(self.toolbar_frame, text="\u2713", width=2, height=1,
                  bg="#07c160", fg="white", relief=tk.FLAT, font=("Segoe UI Symbol", 16),
                  command=self.on_confirm).pack(side=tk.LEFT, padx=2, pady=4)
+
+        # 计算工具栏位置（自适应屏幕边界）
+        self.toolbar_frame.update_idletasks()
+        toolbar_w = self.toolbar_frame.winfo_reqwidth()
+        toolbar_h = self.toolbar_frame.winfo_reqheight()
+
+        # Y 位置：优先在选区下方，空间不够则在选区内顶部
+        if screen_h - y2 < toolbar_h + 10:
+            toolbar_y = y1 + 8  # 选区内顶部
+        else:
+            toolbar_y = y2 + 8  # 选区下方
+
+        # X 位置：优先左对齐，超出右边界则右对齐
+        toolbar_x = x1
+        if toolbar_x + toolbar_w > screen_w:
+            toolbar_x = screen_w - toolbar_w - 10
+
+        self.toolbar_frame.place(x=toolbar_x, y=toolbar_y)
 
     def _select_tool(self, tool: ToolType):
         self.current_tool = tool

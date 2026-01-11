@@ -796,10 +796,6 @@ def create_api_page(state):
             label=L.get('base_url_env', 'API地址环境变量'),
             value=provider_data.get('base_url_env', default_base_url_env), expand=True,
         )
-        model_env_field = ft.TextField(
-            label=L.get('model_env', '模型环境变量'),
-            value=provider_data.get('model_env', ''), expand=True,
-        )
         api_key_field = ft.TextField(
             label=L['api_key'], value=provider_data.get('credentials', {}).get('api_key', ''),
             password=True, can_reveal_password=True, expand=True,
@@ -862,9 +858,7 @@ def create_api_page(state):
             cli = cli_dropdown.value
             cli_info = CLI_TOOLS.get(cli, CLI_TOOLS['claude'])
             base_url_env_field.value = cli_info.get('base_url_env', 'API_BASE_URL')
-            model_env_field.value = ''
             base_url_env_field.update()
-            model_env_field.update()
 
         provider_dropdown.on_change = on_provider_change
         cli_dropdown.on_change = on_cli_change
@@ -921,7 +915,6 @@ def create_api_page(state):
                     'endpoint': endpoint_field.value,
                     'key_name': key_name_field.value,
                     'base_url_env': base_url_env_field.value,
-                    'model_env': model_env_field.value,
                     'credentials': {'api_key': api_key_field.value},
                     'selected_model': selected_model,
                     'available_models': [selected_model] if selected_model else [],
@@ -949,7 +942,6 @@ def create_api_page(state):
             content=ft.Column([
                 ft.Row([name_field, tags_field]),
                 ft.Row([cli_dropdown, provider_dropdown]),
-                model_env_field,
                 model_dropdown,
                 custom_model_field,
                 base_url_env_field,

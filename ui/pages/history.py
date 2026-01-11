@@ -542,46 +542,74 @@ def create_history_page(state):
     stats_text = ft.Text('', size=12, color=ft.Colors.GREY_600)
 
     def clear_empty_sessions(_):
-        """清理空会话（0轮对话，通常由 /clear 命令产生）"""
+        """清理空会话（0轮对话，通常由 /clear 命令产生）- 直接扫描存储目录"""
+        import json
+        import os
+
+        def count_user_turns(file_path: str) -> int:
+            """计算会话文件中的真实用户轮数"""
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                messages = data if isinstance(data, list) else data.get('messages', [])
+                turns = 0
+                for msg in messages:
+                    # Claude 格式
+                    if msg.get('type') == 'user':
+                        content = msg.get('message', {}).get('content', [])
+                        # 检查是否是真实用户消息（不是 tool_result）
+                        has_tool_result = any(
+                            isinstance(b, dict) and b.get('type') == 'tool_result'
+                            for b in (content if isinstance(content, list) else [])
+                        )
+                        if not has_tool_result:
+                            turns += 1
+                    # Codex 格式
+                    elif msg.get('role') == 'user':
+                        content = msg.get('content', '')
+                        if isinstance(content, str) or not any(
+                            isinstance(b, dict) and b.get('type') == 'tool_result'
+                            for b in (content if isinstance(content, list) else [])
+                        ):
+                            turns += 1
+                return turns
+            except Exception:
+                return -1  # 无法读取，跳过
+
         def do_clear(_):
             state.page.close(dlg)
             deleted_count = 0
+            scanned_count = 0
 
             try:
-                mgr = get_current_manager()
-                if lh is not None and mgr:
-                    # 使用 Rust 模块获取所有会话
-                    projects = mgr.list_projects()
-                    for p in projects:
-                        sessions = lh.load_project(current_cli, p)
-                        for s in sessions:
-                            turns = getattr(s, 'user_turn_count', 0)
-                            if turns == 0:
-                                fpath = getattr(s, 'file_path', '')
-                                if fpath:
-                                    try:
-                                        lh.delete_session(current_cli, fpath)
-                                        deleted_count += 1
-                                    except Exception:
-                                        pass
-                elif mgr:
-                    # 回退到 Python 实现
-                    projects = mgr.list_projects()
-                    for p in projects:
-                        sessions = mgr.load_project(p) or []
-                        for s in sessions:
-                            turns = s.get('user_turn_count', s.get('message_count', 0))
-                            if turns == 0:
-                                fpath = s.get('file_path', '')
-                                if fpath:
-                                    try:
-                                        import os
-                                        os.remove(fpath)
-                                        deleted_count += 1
-                                    except Exception:
-                                        pass
+                # 获取 Claude Code 存储目录
+                if current_cli == 'claude':
+                    base_dir = Path.home() / '.claude' / 'projects'
+                elif current_cli == 'codex':
+                    base_dir = Path.home() / '.codex' / 'projects'
+                else:
+                    base_dir = Path.home() / '.claude' / 'projects'
 
-                show_snackbar(state.page, L.get('empty_sessions_cleared', '已清理 {} 个空会话').format(deleted_count))
+                if not base_dir.exists():
+                    show_snackbar(state.page, f"目录不存在: {base_dir}")
+                    return
+
+                # 遍历所有项目目录下的 JSON 文件
+                for project_dir in base_dir.iterdir():
+                    if not project_dir.is_dir():
+                        continue
+                    for session_file in project_dir.glob('*.jsonl'):
+                        scanned_count += 1
+                        turns = count_user_turns(str(session_file))
+                        if turns == 0:
+                            try:
+                                session_file.unlink()
+                                deleted_count += 1
+                                print(f"[清理] 删除空会话: {session_file}")
+                            except Exception as e:
+                                print(f"[清理] 删除失败: {session_file}, {e}")
+
+                show_snackbar(state.page, L.get('empty_sessions_cleared', '已清理 {} 个空会话').format(deleted_count) + f" (扫描 {scanned_count} 个)")
                 # 刷新列表
                 refresh_project_list()
             except Exception as ex:

@@ -7,6 +7,7 @@ import asyncio
 import sys
 import os
 import ctypes
+import threading
 from ctypes import wintypes
 from pathlib import Path
 

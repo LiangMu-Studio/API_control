@@ -761,7 +761,6 @@ def create_api_page(state):
         provider_data = cfg.get('provider', {})
 
         name_field = ft.TextField(label=L['name'], value=cfg.get('label', ''), expand=True)
-        tags_field = ft.TextField(label=L.get('tags', '标签'), value=cfg.get('tags', ''), expand=True, hint_text=L.get('tags_hint', '用逗号分隔'))
 
         # CLI 下拉
         cli_dropdown = ft.Dropdown(
@@ -909,7 +908,7 @@ def create_api_page(state):
                 'id': cfg.get('id', f"{name_field.value}-{int(datetime.now().timestamp())}"),
                 'label': name_field.value,
                 'cli_type': cli_dropdown.value,
-                'tags': tags_field.value,
+                'tags': '',
                 'provider': {
                     'type': provider_type,
                     'endpoint': endpoint_field.value,
@@ -940,7 +939,7 @@ def create_api_page(state):
         dlg = ft.AlertDialog(
             title=ft.Text(L['edit'] if is_edit else L['add']),
             content=ft.Column([
-                ft.Row([name_field, tags_field]),
+                name_field,
                 ft.Row([cli_dropdown, provider_dropdown]),
                 model_dropdown,
                 custom_model_field,

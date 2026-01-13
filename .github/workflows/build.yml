@@ -25,7 +25,8 @@ jobs:
           cd liangmu_history
           pip install maturin
           maturin build --release
-          cp target/release/liangmu_history.pyd ../
+          pip install target/wheels/*.whl
+          cp $(python -c "import liangmu_history; print(liangmu_history.__file__)") ../liangmu_history.pyd
         shell: pwsh
 
       - name: Install dependencies
@@ -66,7 +67,8 @@ jobs:
           cd liangmu_history
           pip install maturin
           maturin build --release
-          cp target/release/libliangmu_history.dylib ../liangmu_history.so
+          pip install target/wheels/*.whl
+          cp $(python -c "import liangmu_history; print(liangmu_history.__file__)") ../liangmu_history.so
 
       - name: Install dependencies
         run: |
@@ -114,7 +116,8 @@ jobs:
           cd liangmu_history
           pip install maturin
           maturin build --release
-          cp target/release/libliangmu_history.so ../liangmu_history.so
+          pip install target/wheels/*.whl
+          cp $(python -c "import liangmu_history; print(liangmu_history.__file__)") ../liangmu_history.so
 
       - name: Install dependencies
         run: |

@@ -274,10 +274,11 @@ def create_api_page(state):
             refresh_session_dropdown_async(force_refresh=True)
             show_snackbar(page, L.get('history_cleared_with_sessions', '已删除: {} ({}个会话移到回收站)').format(current[-30:], cnt))
             page.update()
+
         dlg = ft.AlertDialog(
             title=ft.Text(L.get('confirm_delete', '确认删除')),
             content=ft.Text(L.get('confirm_clear_folder_history', '是否要删除本文件夹历史记录？')),
-            actions=[ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: page.close(dlg)), ft.TextButton(L.get('confirm', '确认'), on_click=do_clear)]
+            actions=[ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: page.close(dlg)), ft.TextButton(L.get('confirm', '确认'), on_click=do_clear, autofocus=True)],
         )
         page.open(dlg)
 
@@ -1314,10 +1315,11 @@ def create_api_page(state):
                     refresh_config_list()
                     show_snackbar(page, L['deleted'])
                 page.close(dlg)
+
             dlg = ft.AlertDialog(
                 title=ft.Text(L['confirm_delete']),
                 content=ft.Text(L['confirm_delete_msg'].format(cfg.get('label', ''))),
-                actions=[ft.TextButton(L['cancel'], on_click=confirm_delete), ft.TextButton(L['delete'], on_click=confirm_delete)],
+                actions=[ft.TextButton(L['cancel'], on_click=confirm_delete), ft.TextButton(L['delete'], on_click=confirm_delete, autofocus=True)],
             )
             page.open(dlg)
 

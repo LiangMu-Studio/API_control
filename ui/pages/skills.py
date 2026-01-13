@@ -433,7 +433,7 @@ def create_skills_page(state):
             content=ft.Text(f"{L.get('skill_delete_desc', '确定要删除')} {skill['name']}?"),
             actions=[
                 ft.TextButton(L['cancel'], on_click=lambda e: state.page.close(confirm_dlg)),
-                ft.ElevatedButton(L['delete'], on_click=do_delete, color=ft.Colors.RED),
+                ft.ElevatedButton(L['delete'], on_click=do_delete, color=ft.Colors.RED, autofocus=True),
             ],
         )
         state.page.open(confirm_dlg)

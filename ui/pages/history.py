@@ -302,7 +302,7 @@ def create_history_page(state):
             ft.TextButton('📄 HTML', on_click=lambda _: export_session('html')),
             ft.TextButton('📝 MD', on_click=lambda _: export_session('md')),
             ft.TextButton('📂 ' + L.get('open_folder', '打开'), on_click=lambda _: open_folder(folder_path)) if folder_path else ft.Container(),
-            ft.TextButton('🗑️ ' + L.get('delete', '删除'), on_click=lambda _: del_session()),
+            ft.TextButton('🗑️ ' + L.get('delete', '删除'), on_click=lambda _: confirm_del_session()),
         ]
 
         # 使用合并后的分析函数（单次遍历）
@@ -599,8 +599,8 @@ def create_history_page(state):
             content=ft.Text(L.get('confirm_delete_round', '确定要删除第 {} 轮对话吗？\n此操作不可恢复。').format(round_idx + 1)),
             actions=[
                 ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: state.page.close(dlg)),
-                ft.TextButton(L.get('delete', '删除'), on_click=do_delete, style=ft.ButtonStyle(color=ft.Colors.RED)),
-            ]
+                ft.TextButton(L.get('delete', '删除'), on_click=do_delete, style=ft.ButtonStyle(color=ft.Colors.RED), autofocus=True),
+            ],
         )
         state.page.open(dlg)
 
@@ -694,6 +694,27 @@ def create_history_page(state):
             loaded_projects.pop(data['group'], None)
             show_snackbar(state.page, L.get('history_moved', '已移至回收站'))
             refresh_project_list()
+
+    def confirm_del_session():
+        """删除会话前弹出确认对话框"""
+        if not selected_session_data[0]:
+            return
+        data = selected_session_data[0]
+        session_name = data.get('info', {}).get('cwd', data.get('session_id', ''))[:40]
+
+        def do_delete(_):
+            state.page.close(dlg)
+            del_session()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('confirm_delete', '确认删除')),
+            content=ft.Text(L.get('confirm_delete_msg', '确定要删除 "{}" 吗？').format(session_name)),
+            actions=[
+                ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: state.page.close(dlg)),
+                ft.TextButton(L.get('delete', '删除'), on_click=do_delete, style=ft.ButtonStyle(color=ft.Colors.RED), autofocus=True),
+            ],
+        )
+        state.page.open(dlg)
 
     # 共享 FilePicker
     file_picker = ft.FilePicker()
@@ -946,7 +967,6 @@ def create_history_page(state):
                 import traceback
                 traceback.print_exc()
                 show_snackbar(state.page, f"清理失败: {ex}")
-
         dlg = ft.AlertDialog(
             title=ft.Text(L.get('confirm_deep_clean', '确认深度清理')),
             content=ft.Text(L.get('confirm_deep_clean_desc',
@@ -958,8 +978,8 @@ def create_history_page(state):
                 '此操作不可恢复，是否继续？')),
             actions=[
                 ft.TextButton(L.get('cancel', '取消'), on_click=lambda _: state.page.close(dlg)),
-                ft.TextButton(L.get('confirm', '确认'), on_click=do_clear)
-            ]
+                ft.TextButton(L.get('confirm', '确认'), on_click=do_clear, autofocus=True)
+            ],
         )
         state.page.open(dlg)
 

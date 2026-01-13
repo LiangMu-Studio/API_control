@@ -64,3 +64,6 @@ tests/
 nul
 *.db.old*
 debug_cmd.txt
+
+# Rust
+liangmu_history/target/

@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Build
+build/
+dist/
+.build/
+_internal/
+*.exe
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (contains sensitive API keys)
+data/
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup
+*.bak
+
+# Logs
+*.log
+
+# exe
+LiangMu-API-Key.exe
+AI-CLI-Manager.exe
+# Screenshots
+screenshots/
+
+# Test files (local debug scripts)
+test_*.py
+tests/
+
+# Temp files
+nul
+*.db.old*
+debug_cmd.txt

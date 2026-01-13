@@ -383,7 +383,10 @@ def create_history_page(state):
         else:
             load_state['tail'] += 10
         build_message_timeline(messages)
-        state.page.update()
+        # 使用 run_thread 确保 UI 更新在正确的线程中执行
+        def do_update():
+            state.page.update()
+        state.page.run_thread(do_update)
 
     def render_round(round_data, round_num, round_idx, all_messages):
         """渲染一轮对话 - 复刻 DEV 版时间线样式"""
@@ -529,20 +532,40 @@ def create_history_page(state):
                     show_snackbar(state.page, "轮次索引无效")
                     return
 
-                # 获取要删除的消息的 uuid 集合
-                user_msg, ai_msgs = rounds_in_ui[round_idx]
-                uuids_to_delete = set()
-                if user_msg:
-                    uuid = user_msg.get('uuid')
-                    if uuid:
-                        uuids_to_delete.add(uuid)
-                for msg in ai_msgs:
-                    uuid = msg.get('uuid')
-                    if uuid:
-                        uuids_to_delete.add(uuid)
+                # 获取轮次起始 UUID
+                user_msg, _ = rounds_in_ui[round_idx]
+                if not user_msg:
+                    show_snackbar(state.page, "无法删除孤儿消息")
+                    return
+                start_uuid = user_msg.get('uuid')
+                if not start_uuid:
+                    show_snackbar(state.page, "消息缺少 UUID")
+                    return
 
-                # 从原文件中删除这些 uuid 对应的消息
-                new_messages = [msg for msg in original_messages if msg.get('uuid') not in uuids_to_delete]
+                # 构建 parentUuid 索引（一次遍历）
+                children_map = {}  # {parent_uuid: [child_uuids]}
+                for msg in original_messages:
+                    parent = msg.get('parentUuid')
+                    if parent:
+                        children_map.setdefault(parent, []).append(msg.get('uuid'))
+
+                # 递归收集所有后代 UUID
+                uuids_to_delete = set()
+                def collect_descendants(uuid):
+                    if uuid and uuid not in uuids_to_delete:
+                        uuids_to_delete.add(uuid)
+                        for child in children_map.get(uuid, []):
+                            collect_descendants(child)
+
+                collect_descendants(start_uuid)
+
+                # 过滤消息（删除后代 + 关联的 file-history-snapshot，保留 system）
+                new_messages = [
+                    msg for msg in original_messages
+                    if msg.get('uuid') not in uuids_to_delete
+                    and not (msg.get('type') == 'file-history-snapshot'
+                             and (msg.get('messageId') or msg.get('snapshot', {}).get('messageId')) in uuids_to_delete)
+                ]
 
                 # 写回文件
                 with open(file_path, 'w', encoding='utf-8') as f:
@@ -785,7 +808,68 @@ def create_history_page(state):
     cli_dropdown.on_change = on_cli_change
 
     search_field = ft.TextField(hint_text=L.get('history_search', '搜索'), width=200, prefix_icon=ft.Icons.SEARCH)
-    search_field.on_submit = lambda e: refresh_project_list(e.control.value or '')
+
+    def do_search(keyword: str):
+        """搜索会话内容"""
+        if not keyword.strip():
+            refresh_project_list('')
+            return
+
+        project_list.controls.clear()
+        expanded_projects.clear()
+        loaded_projects.clear()
+        session_item_refs.clear()
+
+        try:
+            import liangmu_history as lh
+            kw = keyword.strip()
+            results = lh.search(current_cli, kw, 50)
+            if not results:
+                project_list.controls.append(ft.Text(f"未找到 '{keyword}'", color=ft.Colors.GREY_500))
+                state.page.update()
+                return
+
+            stats_text.value = f"找到 {len(results)} 个会话"
+
+            # 只显示会话列表，不加载内容（避免卡顿）
+            for r in results:
+                fp = Path(r.file_path)
+                pid = fp.parent.name if fp.parent else r.id
+                cwd = r.cwd or pid
+
+                def make_click_handler(project_id, session_id, cwd_path, search_kw):
+                    def handler(_):
+                        # 点击后加载会话
+                        mgr = get_current_manager()
+                        if mgr:
+                            sessions = mgr.load_project(project_id)
+                            if session_id in sessions:
+                                info = sessions[session_id]
+                                selected_session_id[0] = session_id
+                                selected_session_data[0] = info
+                                load_state['head'], load_state['tail'] = 100, 100
+                                build_message_timeline(info['messages'])
+                                detail_header.controls.clear()
+                                detail_header.controls.append(ft.Text(f"📁 {cwd_path} (搜索: {search_kw})", size=12, color=ft.Colors.GREY_600))
+                                state.page.update()
+                    return handler
+
+                display = cwd[-60:] if len(cwd) > 60 else cwd
+                project_list.controls.append(ft.Container(
+                    ft.Text(display, size=12, color=ft.Colors.BLUE_400),
+                    padding=8,
+                    border_radius=4,
+                    bgcolor=ft.Colors.GREY_900,
+                    on_click=make_click_handler(pid, r.id, cwd, kw),
+                    ink=True
+                ))
+
+            state.page.update()
+        except Exception as e:
+            project_list.controls.append(ft.Text(f"搜索失败: {e}", color=ft.Colors.RED))
+            state.page.update()
+
+    search_field.on_submit = lambda e: do_search(e.control.value or '')
 
     stats_text = ft.Text('', size=12, color=ft.Colors.GREY_600)
 

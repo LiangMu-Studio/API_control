@@ -76,8 +76,9 @@ PROVIDER_DEFAULTS = {
     },
     'gemini': {
         'endpoint': 'https://generativelanguage.googleapis.com/v1beta',
-        'key_name': 'x-goog-api-key',
-        'base_url_env': 'GEMINI_API_BASE',
+        'key_name': 'GEMINI_API_KEY',
+        'base_url_env': 'GOOGLE_GEMINI_BASE_URL',
+        'model_env': 'GEMINI_MODEL',
         'available_models': [
             {'name': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro'},
             {'name': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
@@ -355,15 +356,26 @@ def create_api_page(state):
             for s in reversed(raw_sessions):
                 # 兼容 Rust SessionInfo 和 Python dict
                 if hasattr(s, 'last_timestamp'):
-                    ts = (s.last_timestamp or '')[:16].replace('T', ' ')
+                    ts_raw = s.last_timestamp or ''
                     sid = s.id
                     fpath = s.file_path
                     turns = getattr(s, 'user_turn_count', 0)
                 else:
-                    ts = (s.get('last_timestamp') or '')[:16].replace('T', ' ')
+                    ts_raw = s.get('last_timestamp') or ''
                     sid = s.get('id', '')
                     fpath = s.get('file_path', '')
                     turns = s.get('user_turn_count', s.get('message_count', 0))
+
+                # UTC 时间转本地时间
+                ts = ts_raw[:16].replace('T', ' ')
+                if ts_raw:
+                    try:
+                        from datetime import datetime, timezone
+                        utc_dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+                        local_dt = utc_dt.astimezone()
+                        ts = local_dt.strftime('%m-%d %H:%M')
+                    except Exception:
+                        pass
 
                 # 格式: 时间 | 轮数 | ID
                 turn_text = f"{turns}轮" if turns else ""
@@ -1127,7 +1139,11 @@ def create_api_page(state):
             options = []
             for m in models:
                 if isinstance(m, dict):
-                    options.append(ft.dropdown.Option(key=m.get('name', ''), text=m.get('label', m.get('name', ''))))
+                    # 如果有 mode，使用 name:mode 作为 key 以区分不同模式
+                    name = m.get('name', '')
+                    mode = m.get('mode', '')
+                    key = f"{name}:{mode}" if mode else name
+                    options.append(ft.dropdown.Option(key=key, text=m.get('label', name)))
                 else:
                     options.append(ft.dropdown.Option(key=m, text=m))
             options.append(ft.dropdown.Option(key='__custom__', text=L.get('custom', '自定义...')))
@@ -1174,10 +1190,16 @@ def create_api_page(state):
         init_provider = provider_dropdown.value or 'anthropic'
         model_dropdown.options = build_model_options(init_provider)
         saved_model = provider_data.get('selected_model')
-        if saved_model:
+        saved_mode = provider_data.get('thinking_mode')
+        # 如果有 thinking_mode，构建带 mode 的 key
+        model_key = f"{saved_model}:{saved_mode}" if saved_model and saved_mode else saved_model
+        if model_key:
             # 检查是否在预设列表中
             preset_keys = [opt.key for opt in model_dropdown.options if opt.key != '__custom__']
-            if saved_model in preset_keys:
+            if model_key in preset_keys:
+                model_dropdown.value = model_key
+            elif saved_model in preset_keys:
+                # 兼容旧配置（没有 mode 的情况）
                 model_dropdown.value = saved_model
             else:
                 model_dropdown.value = '__custom__'
@@ -1192,18 +1214,14 @@ def create_api_page(state):
                 return
 
             provider_type = provider_dropdown.value
-            selected_model = custom_model_field.value if model_dropdown.value == '__custom__' else model_dropdown.value
+            model_key = custom_model_field.value if model_dropdown.value == '__custom__' else model_dropdown.value
 
-            # 获取GLM的thinking_mode
-            thinking_mode = None
-            if provider_type == 'glm' and selected_model:
-                for opt in model_dropdown.options:
-                    if opt.key == selected_model:
-                        for mm in PROVIDER_DEFAULTS['glm']['available_models']:
-                            if isinstance(mm, dict) and mm.get('label') == opt.text:
-                                thinking_mode = mm.get('mode')
-                                break
-                        break
+            # 从 key 中提取模型名和 mode（格式：name:mode 或 name）
+            if ':' in model_key and model_dropdown.value != '__custom__':
+                selected_model, thinking_mode = model_key.rsplit(':', 1)
+            else:
+                selected_model = model_key
+                thinking_mode = None
 
             try:
                 max_tokens = int(max_tokens_field.value)
@@ -1545,6 +1563,10 @@ def create_api_page(state):
         endpoint = cfg.get('provider', {}).get('endpoint', '')
         base_url_env = cfg.get('provider', {}).get('base_url_env', cli_info['base_url_env'])
         selected_model = cfg.get('provider', {}).get('selected_model', '')
+        # 获取 provider 类型以查找 model_env
+        provider_type = cfg.get('provider', {}).get('type', '')
+        provider_defaults = PROVIDER_DEFAULTS.get(provider_type, {})
+        model_env = provider_defaults.get('model_env', '')
         env = os.environ.copy()
         env[key_name] = api_key
         if endpoint:
@@ -1572,10 +1594,8 @@ def create_api_page(state):
             env[key_name] = safe_key
             if endpoint:
                 env[base_url_env] = safe_endpoint
-            if selected_model:
-                model_env = cfg.get('provider', {}).get('model_env', '')
-                if model_env:
-                    env[model_env] = safe_model
+            if selected_model and model_env:
+                env[model_env] = safe_model
 
             # 检测是否有 Windows Terminal（作为终端宿主）
             use_wt = has_windows_terminal()
@@ -1593,16 +1613,15 @@ def create_api_page(state):
             # 构建 shell 启动命令
             if 'pwsh' in term_lower or 'powershell' in term_lower:
                 # PowerShell 需要在命令中显式设置环境变量
+                # 使用 ${env:name} 语法兼容包含连字符的变量名
                 safe_key_ps = safe_key.replace("'", "''")
-                ps_env_cmds = [f"$env:{key_name} = '{safe_key_ps}'"]
+                ps_env_cmds = [f"${{env:{key_name}}} = '{safe_key_ps}'"]
                 if endpoint:
                     safe_endpoint_ps = safe_endpoint.replace("'", "''")
-                    ps_env_cmds.append(f"$env:{base_url_env} = '{safe_endpoint_ps}'")
-                if selected_model:
-                    model_env = cfg.get('provider', {}).get('model_env', '')
-                    if model_env:
-                        safe_model_ps = safe_model.replace("'", "''")
-                        ps_env_cmds.append(f"$env:{model_env} = '{safe_model_ps}'")
+                    ps_env_cmds.append(f"${{env:{base_url_env}}} = '{safe_endpoint_ps}'")
+                if selected_model and model_env:
+                    safe_model_ps = safe_model.replace("'", "''")
+                    ps_env_cmds.append(f"${{env:{model_env}}} = '{safe_model_ps}'")
                 ps_full_cmd = '; '.join(ps_env_cmds + [cli_cmd])
                 # 使用 EncodedCommand 避免引号嵌套问题
                 import base64
@@ -1613,10 +1632,8 @@ def create_api_page(state):
                 bash_env_cmds = [f"export {key_name}='{safe_key}'"]
                 if endpoint:
                     bash_env_cmds.append(f"export {base_url_env}='{safe_endpoint}'")
-                if selected_model:
-                    model_env = cfg.get('provider', {}).get('model_env', '')
-                    if model_env:
-                        bash_env_cmds.append(f"export {model_env}='{safe_model}'")
+                if selected_model and model_env:
+                    bash_env_cmds.append(f"export {model_env}='{safe_model}'")
                 bash_full_cmd = '; '.join(bash_env_cmds + [cli_cmd])
                 # 处理工作目录：Windows 路径转 WSL 路径
                 if cwd:
@@ -1636,11 +1653,9 @@ def create_api_page(state):
                 if endpoint:
                     safe_endpoint_bash = safe_endpoint.replace("'", "'\\''")
                     bash_env_cmds.append(f"export {base_url_env}='{safe_endpoint_bash}'")
-                if selected_model:
-                    model_env = cfg.get('provider', {}).get('model_env', '')
-                    if model_env:
-                        safe_model_bash = safe_model.replace("'", "'\\''")
-                        bash_env_cmds.append(f"export {model_env}='{safe_model_bash}'")
+                if selected_model and model_env:
+                    safe_model_bash = safe_model.replace("'", "'\\''")
+                    bash_env_cmds.append(f"export {model_env}='{safe_model_bash}'")
                 bash_full_cmd = '; '.join(bash_env_cmds + [cli_cmd])
                 # Bash -c 需要整个命令用引号包裹，这里内部用了单引号，外部用双引号应该安全（除非值里有特殊字符）
                 # 为了保险，对双引号进行转义
@@ -1652,7 +1667,6 @@ def create_api_page(state):
                     setx_cmds = [f'setx {key_name} {safe_key}']
                     if endpoint:
                         setx_cmds.append(f'setx {base_url_env} {safe_endpoint}')
-                    model_env = cfg.get('provider', {}).get('model_env', '')
                     if selected_model and model_env:
                         setx_cmds.append(f'setx {model_env} {safe_model}')
                     set_cmds = [f'set {key_name}={safe_key}']
@@ -1665,10 +1679,8 @@ def create_api_page(state):
                     set_cmds = [f'set {key_name}={safe_key}']
                     if endpoint:
                         set_cmds.append(f'set {base_url_env}={safe_endpoint}')
-                    if selected_model:
-                        model_env = cfg.get('provider', {}).get('model_env', '')
-                        if model_env:
-                            set_cmds.append(f'set {model_env}={safe_model}')
+                    if selected_model and model_env:
+                        set_cmds.append(f'set {model_env}={safe_model}')
                     full_cmd = ' && '.join(set_cmds + [cli_cmd])
                 shell_cmd = f'cmd /k "{full_cmd}"'
 

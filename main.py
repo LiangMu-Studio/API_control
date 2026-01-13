@@ -393,6 +393,7 @@ def main(page: ft.Page):
     if _tray_icon is None:
         try:
             from ui.tray import create_tray_icon, run_tray_in_background, stop_tray
+            print("[Tray] 开始创建托盘图标...")
 
             def show_window():
                 def do_show():
@@ -428,11 +429,16 @@ def main(page: ft.Page):
                 subprocess.Popen([sys.executable, script], creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
 
             _tray_icon = create_tray_icon(state, show_window, quit_app, tray_screenshot, tray_copy_path)
+            print(f"[Tray] create_tray_icon 返回: {_tray_icon}")
             global _global_tray_icon
             _global_tray_icon = _tray_icon  # 保存到全局变量供 atexit 清理
-            run_tray_in_background(_tray_icon)
-        except Exception:
-            pass
+            if _tray_icon:
+                run_tray_in_background(_tray_icon)
+                print("[Tray] 托盘图标已启动")
+            else:
+                print("[Tray] 托盘图标创建失败，返回 None")
+        except Exception as e:
+            print(f"[Tray] 创建托盘图标失败: {e}")
 
 
 if __name__ == "__main__":

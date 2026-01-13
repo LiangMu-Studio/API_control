@@ -314,7 +314,8 @@ impl CliHistoryProvider for ClaudeProvider {
         }
 
         // 并行获取每个项目的 cwd
-        dirs.par_iter()
+        let mut projects: Vec<Project> = dirs
+            .par_iter()
             .filter_map(|entry| {
                 let path = entry.path();
                 let id = path.file_name()?.to_str()?.to_string();
@@ -353,7 +354,11 @@ impl CliHistoryProvider for ClaudeProvider {
                     last_activity: None,
                 })
             })
-            .collect()
+            .collect();
+
+        // 并行处理后重新按修改时间排序（降序）
+        projects.sort_by(|a, b| b.last_modified.partial_cmp(&a.last_modified).unwrap_or(std::cmp::Ordering::Equal));
+        projects
     }
 
     fn find_project_by_cwd(&self, cwd: &str) -> Option<Project> {
@@ -390,11 +395,11 @@ impl CliHistoryProvider for ClaudeProvider {
             .map(|e| e.path())
             .collect();
 
-        // 并行解析，过滤掉 <=1 轮的无效会话
+        // 并行解析，过滤掉 0 轮的无效会话
         let mut sessions: Vec<SessionInfo> = files
             .par_iter()
             .filter_map(|f| self.parse_session_info(f))
-            .filter(|s| s.user_turn_count > 1) // 复刻 DEV 版：过滤 <=1 轮会话
+            .filter(|s| s.user_turn_count >= 1) // 至少有 1 轮对话
             .collect();
 
         // 按最后时间戳排序

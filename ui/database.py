@@ -768,6 +768,13 @@ class MCPSkillLibrary:
                 is_default INTEGER DEFAULT 0,
                 created_at TEXT
             )''')
+            # 工作文件夹预设记忆
+            conn.execute('''CREATE TABLE IF NOT EXISTS workdir_presets (
+                workdir TEXT PRIMARY KEY,
+                mcp_preset TEXT,
+                skill_preset TEXT,
+                updated_at TEXT
+            )''')
             conn.commit()
 
     # ===== MCP 库操作 =====
@@ -965,6 +972,24 @@ class MCPSkillLibrary:
             d['skill_names'] = json.loads(d['skill_names']) if d['skill_names'] else []
             return d
         return None
+
+    # ===== 工作文件夹预设记忆 =====
+    def save_workdir_presets(self, workdir: str, mcp_preset: str = None, skill_preset: str = None):
+        """保存工作文件夹的预设选择"""
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''INSERT OR REPLACE INTO workdir_presets (workdir, mcp_preset, skill_preset, updated_at)
+                VALUES (?, COALESCE(?, (SELECT mcp_preset FROM workdir_presets WHERE workdir=?)),
+                        COALESCE(?, (SELECT skill_preset FROM workdir_presets WHERE workdir=?)), ?)''',
+                (workdir, mcp_preset, workdir, skill_preset, workdir, now))
+            conn.commit()
+
+    def get_workdir_presets(self, workdir: str) -> dict:
+        """获取工作文件夹的预设选择"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT mcp_preset, skill_preset FROM workdir_presets WHERE workdir=?', (workdir,)).fetchone()
+        return dict(row) if row else {'mcp_preset': None, 'skill_preset': None}
 
 
 # MCP/Skill 库实例

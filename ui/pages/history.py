@@ -559,18 +559,15 @@ def create_history_page(state):
                     if parent:
                         children_map.setdefault(parent, []).append(msg.get('uuid'))
 
-                # 收集当前轮次的所有消息（到下一轮边界为止）
+                # 收集当前轮次的所有消息（到下一轮边界为止）- 使用迭代避免栈溢出
                 uuids_to_delete = set()
-                def collect_round_messages(uuid):
-                    if not uuid or uuid in uuids_to_delete:
-                        return
-                    if uuid == next_round_uuid:  # 遇到下一轮边界，停止
-                        return
+                stack = [start_uuid]
+                while stack:
+                    uuid = stack.pop()
+                    if not uuid or uuid in uuids_to_delete or uuid == next_round_uuid:
+                        continue
                     uuids_to_delete.add(uuid)
-                    for child in children_map.get(uuid, []):
-                        collect_round_messages(child)
-
-                collect_round_messages(start_uuid)
+                    stack.extend(children_map.get(uuid, []))
 
                 # 过滤消息并修复 parentUuid
                 new_messages = []
@@ -596,7 +593,8 @@ def create_history_page(state):
                     else:
                         json.dump(new_messages, f, ensure_ascii=False, indent=2)
 
-                show_snackbar(state.page, L.get('round_deleted', '已删除第 {} 轮对话').format(round_idx + 1))
+                deleted_count = len(uuids_to_delete)
+                show_snackbar(state.page, L.get('round_deleted', '已删除第 {} 轮对话').format(round_idx + 1) + f' ({deleted_count} 条消息)')
 
                 # 刷新显示 - 直接从 CC 系统文件重新读取
                 loaded_projects.pop(data['group'], None)  # 清除本地缓存

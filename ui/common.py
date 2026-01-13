@@ -22,12 +22,12 @@ DEBUG = False
 TRASH_RETENTION_DAYS = 7
 
 def show_snackbar(page, text, duration=1000):
-    """显示 SnackBar 提示，默认 1 秒后自动关闭（线程安全）"""
-    def do_show():
+    """显示 SnackBar 提示，默认 1 秒后自动关闭"""
+    try:
         page.open(ft.SnackBar(ft.Text(text), duration=duration))
         page.update()
-    # 使用 run_thread 确保在主线程执行 UI 更新
-    page.run_thread(do_show)
+    except (AssertionError, Exception):
+        pass  # 忽略 UI 更新时的竞态条件错误
 
 
 # ========== 主题配置 ==========

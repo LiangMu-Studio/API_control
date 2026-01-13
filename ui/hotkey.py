@@ -90,14 +90,17 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
     """注册截图全局快捷键"""
     global _current_screenshot_hotkey
     if not HAS_KEYBOARD:
+        print("[Hotkey] keyboard 模块未加载，跳过截图快捷键注册")
         return
 
     hotkey = hotkey or load_hotkey("screenshot")
+    print(f"[Hotkey] 正在注册截图快捷键: {hotkey}")
     # 默认截图目录
     if not save_dir:
         save_dir = str(Path(__file__).parent.parent / "screenshots")
 
     def take_screenshot():
+        print("[Hotkey] Alt+S 被按下，开始截图...")
         old_title = None
         if page:
             try:
@@ -134,6 +137,7 @@ def setup_screenshot_hotkey(save_dir: str = None, hotkey: str = None, page=None)
 
         keyboard.add_hotkey(hotkey, take_screenshot)
         _current_screenshot_hotkey = hotkey
+        print(f"[Hotkey] 截图快捷键注册成功: {hotkey}")
 
 
 def _get_all_files(path: Path) -> list:

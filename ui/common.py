@@ -2,7 +2,7 @@
 # Copyright (c) 2025 LiangMu-Studio
 # Licensed under GPL v3
 
-VERSION = "1.0"
+VERSION = "1.1.0"
 
 import flet as ft
 import json

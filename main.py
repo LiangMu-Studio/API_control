@@ -125,7 +125,7 @@ def main(page: ft.Page):
             # 只有托盘存在时才隐藏任务栏图标
             if _tray_icon:
                 page.window.skip_task_bar = True
-            page.update()
+                page.update()
 
     page.window.on_event = on_window_event
 
@@ -200,7 +200,7 @@ def main(page: ft.Page):
     theme_mgr.set_title_bar(title_bar)
 
     # 页面懒加载 - 首次访问时才创建，减少启动时间
-    _pages = {}  # {idx: (page_control, refresh_func)}
+    _pages = {}  # {idx: (page_control, refresh_func, extra_refresh_func)}
     _page_creators = {
         0: create_api_page,
         1: create_prompts_page,
@@ -214,13 +214,21 @@ def main(page: ft.Page):
         if idx not in _pages:
             creator = _page_creators.get(idx)
             if creator:
-                page_ctrl, refresh_fn = creator(state)
-                _pages[idx] = (page_ctrl, refresh_fn)
+                result = creator(state)
+                # 支持返回 2 个或 3 个值
+                if isinstance(result, tuple) and len(result) == 3:
+                    page_ctrl, refresh_fn, extra_fn = result
+                elif isinstance(result, tuple):
+                    page_ctrl, refresh_fn = result
+                    extra_fn = None
+                else:
+                    page_ctrl, refresh_fn, extra_fn = result, None, None
+                _pages[idx] = (page_ctrl, refresh_fn, extra_fn)
                 theme_mgr.register_page(idx, refresh_fn)
-        return _pages.get(idx, (None, None))
+        return _pages.get(idx, (None, None, None))
 
     # 启动时只创建首页
-    api_page, refresh_api = get_or_create_page(0)
+    api_page, refresh_api, _ = get_or_create_page(0)
 
     current_page_idx = [0]
     content_area = ft.Container(api_page, expand=True, padding=20)
@@ -229,11 +237,14 @@ def main(page: ft.Page):
         idx = e.control.selected_index
         current_page_idx[0] = idx
         t = state.get_theme()
-        page_ctrl, refresh_fn = get_or_create_page(idx)
+        page_ctrl, refresh_fn, extra_fn = get_or_create_page(idx)
         if page_ctrl:
             content_area.content = page_ctrl
             if refresh_fn:
                 refresh_fn()
+            # 切换到首页时刷新预设下拉菜单
+            if idx == 0 and extra_fn:
+                extra_fn()
         content_area.bgcolor = t["surface"]
         page.update()
 
@@ -241,13 +252,27 @@ def main(page: ft.Page):
         theme_mgr.toggle(current_page_idx[0])
 
     def switch_lang(_):
-        w, h, x, y = page.window.width, page.window.height, page.window.left, page.window.top
         state.toggle_lang()
-        if page.controls:
-            page.controls.clear()
-        page.update()
-        main(page)
-        page.window.width, page.window.height, page.window.left, page.window.top = w, h, x, y
+        L_new = state.L
+        # 更新导航栏标签
+        nav_rail.destinations = [
+            ft.NavigationRailDestination(icon=ft.Icons.KEY, label=L_new['api_config']),
+            ft.NavigationRailDestination(icon=ft.Icons.CHAT, label=L_new['prompts']),
+            ft.NavigationRailDestination(icon=ft.Icons.HISTORY, label=L_new['history']),
+            ft.NavigationRailDestination(icon=ft.Icons.EXTENSION, label=L_new['mcp']),
+            ft.NavigationRailDestination(icon=ft.Icons.AUTO_FIX_HIGH, label=L_new.get('skills', 'Skills')),
+        ]
+        # 清除页面缓存，下次访问时重建
+        _pages.clear()
+        # 重建当前页面
+        page_ctrl, _, _ = get_or_create_page(current_page_idx[0])
+        if page_ctrl:
+            content_area.content = page_ctrl
+        # 确保窗口和任务栏图标可见
+        page.window.skip_task_bar = False
+        hwnd = _hwnd_cache[0] or get_hwnd()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         page.update()
 
     def open_feedback(_):
@@ -354,8 +379,10 @@ def main(page: ft.Page):
     def setup_hotkeys():
         import time
         time.sleep(0.5)  # 等待窗口完全初始化
-        setup_screenshot_hotkey(page=page)
-        setup_copypath_hotkey(page=page)
+        # 检查快捷键是否启用
+        if state.settings.get('hotkey_enabled', True):
+            setup_screenshot_hotkey(page=page)
+            setup_copypath_hotkey(page=page)
     threading.Thread(target=setup_hotkeys, daemon=True).start()
 
     # 注册 Win+V 剪贴板粘贴支持

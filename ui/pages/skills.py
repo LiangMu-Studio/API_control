@@ -445,56 +445,156 @@ def create_skills_page(state):
         show_snackbar(state.page, L.get('skill_refreshed', '已刷新'))
 
     def show_preset_manager(e):
-        """显示 Skill 预设管理对话框"""
-        preset_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=5)
+        """显示 Skill 预设管理对话框 - 左右分栏布局"""
+        selected_preset = [None]  # 当前选中的预设名称
+        preset_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=2, expand=True)
+        content_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=2, expand=True)
+        content_title = ft.Text(L.get('preset_select_group', '请选择分组'), weight=ft.FontWeight.BOLD)
 
         def refresh_preset_list():
             preset_list.controls.clear()
-            for p in mcp_skill_library.get_all_skill_presets():
+            presets = mcp_skill_library.get_all_skill_presets()
+            for p in presets:
                 is_default = p.get('is_default', False)
+                is_selected = selected_preset[0] == p['name']
                 preset_list.controls.append(ft.Container(
                     ft.Row([
                         ft.Icon(ft.Icons.STAR if is_default else ft.Icons.STAR_BORDER,
-                               color=ft.Colors.AMBER if is_default else ft.Colors.GREY),
-                        ft.Text(p['name'], expand=True),
-                        ft.Text(f"({len(p.get('skill_names', []))})", color=ft.Colors.GREY_600),
-                        ft.IconButton(ft.Icons.DELETE, on_click=lambda ev, n=p['name']: delete_preset(n)),
-                    ]),
-                    padding=5, border_radius=4,
-                    bgcolor=ft.Colors.BLUE_50 if is_default else None,
+                               color=ft.Colors.AMBER if is_default else ft.Colors.GREY, size=18),
+                        ft.Text(p['name'], expand=True, weight=ft.FontWeight.BOLD if is_selected else None),
+                        ft.Text(f"({len(p.get('skill_names', []))})", color=ft.Colors.GREY_600, size=12),
+                    ], spacing=5),
+                    padding=ft.padding.symmetric(5, 8), border_radius=4,
+                    bgcolor=ft.Colors.BLUE_100 if is_selected else (ft.Colors.BLUE_50 if is_default else None),
+                    on_click=lambda ev, n=p['name']: select_preset(n),
                 ))
             state.page.update()
 
-        def delete_preset(name):
-            mcp_skill_library.delete_skill_preset(name)
+        def refresh_content_list():
+            content_list.controls.clear()
+            if not selected_preset[0]:
+                content_title.value = L.get('preset_select_group', '请选择分组')
+                state.page.update()
+                return
+            preset = next((p for p in mcp_skill_library.get_all_skill_presets() if p['name'] == selected_preset[0]), None)
+            if not preset:
+                return
+            content_title.value = f"{L.get('preset_content', '分组内容')}: {preset['name']}"
+            selected_names = set(preset.get('skill_names', []))
+
+            # 按来源分组
+            by_source = {}
+            for s in all_skills:
+                src = s.get('source', 'other')
+                if src not in by_source:
+                    by_source[src] = []
+                by_source[src].append(s)
+
+            source_order = ['global', 'project', 'discovered']
+            source_labels = {
+                'global': L.get('skill_global', '全局'),
+                'project': L.get('skill_project', '项目级'),
+                'discovered': L.get('skill_discovered', '历史发现'),
+            }
+
+            for src in source_order:
+                if src not in by_source:
+                    continue
+                items = by_source[src]
+                # 来源标题
+                content_list.controls.append(ft.Container(
+                    ft.Row([
+                        ft.Icon(ft.Icons.FOLDER, color=ft.Colors.AMBER, size=16),
+                        ft.Text(source_labels.get(src, src), weight=ft.FontWeight.BOLD, size=13),
+                        ft.Text(f"({len(items)})", color=ft.Colors.GREY_600, size=11),
+                    ], spacing=5),
+                    padding=ft.padding.only(top=8, bottom=4),
+                ))
+                # Skill 列表
+                for s in items:
+                    skill_name = s['name']
+                    cb = ft.Checkbox(
+                        value=skill_name in selected_names, label=skill_name,
+                        on_change=lambda ev, n=skill_name: toggle_skill_in_preset(n, ev.control.value)
+                    )
+                    content_list.controls.append(ft.Container(cb, padding=ft.padding.only(left=20)))
+            state.page.update()
+
+        def select_preset(name):
+            selected_preset[0] = name
             refresh_preset_list()
-            show_snackbar(state.page, L.get('preset_deleted', '预设已删除'))
+            refresh_content_list()
+
+        def toggle_skill_in_preset(skill_name, checked):
+            if not selected_preset[0]:
+                return
+            preset = next((p for p in mcp_skill_library.get_all_skill_presets() if p['name'] == selected_preset[0]), None)
+            if not preset:
+                return
+            names = set(preset.get('skill_names', []))
+            if checked:
+                names.add(skill_name)
+            else:
+                names.discard(skill_name)
+            mcp_skill_library.add_skill_preset(selected_preset[0], list(names), preset.get('is_default', False))
+            refresh_preset_list()
 
         def create_preset(ev):
             name = name_field.value.strip()
             if not name:
                 return
-            # 使用全局 Skill 作为预设内容
-            selected = [s['name'] for s in all_skills if s['source'] == 'global']
-            mcp_skill_library.add_skill_preset(name, selected)
+            mcp_skill_library.add_skill_preset(name, [])
             name_field.value = ''
+            selected_preset[0] = name
             refresh_preset_list()
+            refresh_content_list()
             show_snackbar(state.page, L.get('preset_created', '预设已创建'))
 
-        name_field = ft.TextField(label=L.get('preset_name', '预设名称'), width=200)
+        def set_default_preset(ev):
+            if not selected_preset[0]:
+                return
+            preset = next((p for p in mcp_skill_library.get_all_skill_presets() if p['name'] == selected_preset[0]), None)
+            if preset:
+                mcp_skill_library.add_skill_preset(selected_preset[0], preset.get('skill_names', []), is_default=True)
+                refresh_preset_list()
+                show_snackbar(state.page, L.get('preset_default_set', '已设为默认预设'))
+
+        def delete_preset(ev):
+            if not selected_preset[0]:
+                return
+            mcp_skill_library.delete_skill_preset(selected_preset[0])
+            selected_preset[0] = None
+            refresh_preset_list()
+            refresh_content_list()
+            show_snackbar(state.page, L.get('preset_deleted', '预设已删除'))
+
+        name_field = ft.TextField(label=L.get('preset_name', '预设名称'), width=140, dense=True)
         refresh_preset_list()
+
+        # 左侧面板：分组列表
+        left_panel = ft.Container(
+            ft.Column([
+                ft.Row([name_field, ft.IconButton(ft.Icons.ADD, on_click=create_preset, tooltip=L['add'])], spacing=5),
+                ft.Divider(height=10),
+                preset_list,
+                ft.Divider(height=10),
+                ft.Row([
+                    ft.IconButton(ft.Icons.STAR_BORDER, on_click=set_default_preset, tooltip=L.get('set_default', '设为默认')),
+                    ft.IconButton(ft.Icons.DELETE, on_click=delete_preset, tooltip=L['delete']),
+                ], spacing=5),
+            ], spacing=5),
+            width=200, padding=10, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8,
+        )
+
+        # 右侧面板：分组内容
+        right_panel = ft.Container(
+            ft.Column([content_title, ft.Divider(height=10), content_list], spacing=5),
+            width=280, padding=10, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8,
+        )
 
         dlg = ft.AlertDialog(
             title=ft.Text(L.get('preset_manage', '管理预设')),
-            content=ft.Container(
-                ft.Column([
-                    ft.Row([name_field, ft.ElevatedButton(L['add'], on_click=create_preset)]),
-                    ft.Text(L.get('preset_select_items', '选择项目') + ': ' + L.get('skill_global', '全局') + ' Skills',
-                           size=11, color=ft.Colors.GREY_600),
-                    ft.Container(preset_list, height=250),
-                ], spacing=10),
-                width=400
-            ),
+            content=ft.Container(ft.Row([left_panel, right_panel], spacing=10), height=400),
             actions=[ft.TextButton(L['close'], on_click=lambda ev: state.page.close(dlg))],
         )
         state.page.open(dlg)
@@ -538,9 +638,9 @@ def create_skills_page(state):
     skills_page = ft.Column([
         ft.Row([
             ft.Text(L.get('skills', 'Skills'), size=20, weight=ft.FontWeight.BOLD),
+            ft.IconButton(ft.Icons.BOOKMARKS, on_click=show_preset_manager, tooltip=L.get('preset_manage', '管理预设')),
             ft.IconButton(ft.Icons.ADD, on_click=create_skill, tooltip=L.get('skill_new', '新建')),
             ft.IconButton(ft.Icons.REFRESH, on_click=refresh_data, tooltip=L.get('refresh', '刷新')),
-            ft.IconButton(ft.Icons.MORE_HORIZ, on_click=show_more_menu, tooltip=L.get('more', '更多')),
             ft.IconButton(ft.Icons.DELETE, on_click=delete_skill, tooltip=L['delete']),
         ]),
         ft.Text(L.get('skill_hint', '上方为全局 Skill，下方为 Skill 库'), size=12, color=ft.Colors.GREY_600),

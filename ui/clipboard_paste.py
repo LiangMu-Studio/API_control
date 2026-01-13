@@ -239,10 +239,10 @@ def setup_clipboard_paste(page):
     for control in page.controls:
         _scan_and_wrap(control)
 
-    # 使用 add_hotkey 检测 Win+V（避免 hook 干扰其他快捷键）
+    # 使用 add_hotkey 检测 Win+V（suppress=False 确保按键传递给系统）
     def _on_winv_hotkey():
         threading.Thread(target=_on_winv, daemon=True).start()
-    keyboard.add_hotkey('win+v', _on_winv_hotkey)
+    keyboard.add_hotkey('win+v', _on_winv_hotkey, suppress=False)
     _state['keyboard_hook'] = 'win+v'  # 保存用于清理
 
 

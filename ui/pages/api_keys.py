@@ -752,6 +752,12 @@ def create_api_page(state):
         label=L.get('preset_skill', 'Skill预设'), options=build_skill_preset_options(), width=140
     )
 
+    def refresh_preset_dropdowns():
+        """刷新 MCP 和 Skill 预设下拉菜单"""
+        mcp_preset_dropdown.options = build_mcp_preset_options()
+        skill_preset_dropdown.options = build_skill_preset_options()
+        page.update()
+
     def apply_mcp_preset(e):
         """应用 MCP 预设到当前工作目录"""
         if not work_dir_input.value:
@@ -1672,8 +1678,8 @@ def create_api_page(state):
                 wt_cmd = 'wt -w 0 nt'
                 if cwd:
                     wt_cmd += f' -d "{cwd}"'
-                    # 用工作目录最后一级作为标签页标题，并阻止应用程序覆盖
-                    tab_title = Path(cwd).name
+                    # 用 CLI名称:工作目录 作为标签页标题，并阻止应用程序覆盖
+                    tab_title = f"{cli_type.upper()}:{Path(cwd).name}"
                     wt_cmd += f' --title "{tab_title}" --suppressApplicationTitle'
                 # 使用 -- 分隔 WT 参数和要执行的命令
                 wt_cmd += f' -- {shell_cmd}'
@@ -1704,7 +1710,7 @@ def create_api_page(state):
                     subprocess.Popen(['cmd', '/k', full_cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
             # Linux / macOS
-            tab_title = Path(cwd).name if cwd else 'Terminal'
+            tab_title = f"{cli_type.upper()}:{Path(cwd).name}" if cwd else cli_type.upper()
             term_lower = terminal_cmd.lower()
 
             if 'gnome-terminal' in term_lower:
@@ -1932,17 +1938,39 @@ def create_api_page(state):
     pick_path_btn.on_click = pick_path
 
     # 快捷键设置
-    from ..hotkey import load_hotkey, update_hotkey, update_copypath_hotkey
+    from ..hotkey import load_hotkey, update_hotkey, update_copypath_hotkey, cleanup_hotkeys, setup_screenshot_hotkey, setup_copypath_hotkey
 
     def format_hotkey(hk: str) -> str:
         """格式化快捷键显示：alt+s -> Alt+S"""
         return '+'.join(p.capitalize() for p in hk.split('+'))
 
+    # 快捷键开关
+    hotkey_enabled = state.settings.get('hotkey_enabled', True)
+
+    def on_hotkey_switch_change(e):
+        state.settings['hotkey_enabled'] = e.control.value
+        save_settings(state.settings)
+        if e.control.value:
+            # 启用快捷键
+            setup_screenshot_hotkey(work_dir_input.value, None, page)
+            setup_copypath_hotkey(None, page)
+            show_snackbar(page, L.get('hotkey_enabled', '快捷键已启用'))
+        else:
+            # 禁用快捷键
+            cleanup_hotkeys()
+            show_snackbar(page, L.get('hotkey_disabled', '快捷键已禁用，请使用按钮操作'))
+
+    hotkey_switch = ft.Switch(
+        label=L.get('enable_hotkey', '启用快捷键'),
+        value=hotkey_enabled,
+        on_change=on_hotkey_switch_change
+    )
+
     current_hotkey_display = format_hotkey(load_hotkey("screenshot"))
-    hotkey_btn = ft.OutlinedButton(f"截图 {current_hotkey_display}", on_click=lambda e: show_hotkey_dialog(e, "screenshot"), width=120)
+    hotkey_btn = ft.OutlinedButton(f"{state.L.get('screenshot', '截图')} {current_hotkey_display}", on_click=lambda e: show_hotkey_dialog(e, "screenshot"), width=120)
 
     current_copypath_display = format_hotkey(load_hotkey("copy_path"))
-    copypath_btn = ft.OutlinedButton(f"路径 {current_copypath_display}", on_click=lambda e: show_hotkey_dialog(e, "copy_path"), width=120)
+    copypath_btn = ft.OutlinedButton(f"{state.L.get('pick_path', '复制路径')} {current_copypath_display}", on_click=lambda e: show_hotkey_dialog(e, "copy_path"), width=120)
 
     def show_hotkey_dialog(e, key_type="screenshot"):
         """显示快捷键设置对话框"""
@@ -1954,8 +1982,9 @@ def create_api_page(state):
 
         captured_keys = []
         current_hk = format_hotkey(load_hotkey(key_type))
-        title = "设置截图快捷键" if key_type == "screenshot" else "设置复制路径快捷键"
-        key_display = ft.Text("请按下快捷键...", size=16, weight=ft.FontWeight.BOLD)
+        L = state.L
+        title = L.get('hotkey_screenshot_title', '设置截图快捷键') if key_type == "screenshot" else L.get('hotkey_copypath_title', '设置复制路径快捷键')
+        key_display = ft.Text(L.get('hotkey_press', '请按下快捷键...'), size=16, weight=ft.FontWeight.BOLD)
         hook_id = [None]
 
         # 截图清理周期（仅截图对话框显示）
@@ -1993,11 +2022,11 @@ def create_api_page(state):
                 new_key = "+".join(p.lower() for p in captured_keys)
                 if key_type == "screenshot":
                     update_hotkey(new_key, work_dir_input.value, page)
-                    hotkey_btn.text = f"截图 {'+'.join(captured_keys)}"
+                    hotkey_btn.text = f"{L.get('screenshot', '截图')} {'+'.join(captured_keys)}"
                 else:
                     update_copypath_hotkey(new_key)
-                    copypath_btn.text = f"路径 {'+'.join(captured_keys)}"
-                show_snackbar(page, f'快捷键已设置: {"+".join(captured_keys)}')
+                    copypath_btn.text = f"{L.get('pick_path', '复制路径')} {'+'.join(captured_keys)}"
+                show_snackbar(page, L.get('hotkey_set', '快捷键已设置: {}').format('+'.join(captured_keys)))
             # 保存清理周期
             if cleanup_field:
                 try:
@@ -2015,7 +2044,7 @@ def create_api_page(state):
             page.close(dlg)
 
         content_items = [
-            ft.Text(f"当前快捷键为：{current_hk}", size=14),
+            ft.Text(L.get('hotkey_current', '当前快捷键为: {}').format(current_hk), size=14),
             key_display,
         ]
         if cleanup_field:
@@ -2091,17 +2120,8 @@ def create_api_page(state):
         ], wrap=True, spacing=5),
         ft.Row([work_dir_input, work_dir_menu, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
                 ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history)]),
-        ft.Row([session_dropdown, session_preview_btn, ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)]),
-        ft.Row([
-            prompt_dropdown,
-            mcp_preset_dropdown,
-            skill_preset_dropdown,
-            ft.ElevatedButton(L.get('mcp_select', 'MCP 服务器'), icon=ft.Icons.EXTENSION, on_click=show_mcp_selector, width=130),
-            screenshot_btn,
-            hotkey_btn,
-            pick_path_btn,
-            copypath_btn,
-        ], spacing=10),
+        ft.Row([prompt_dropdown, mcp_preset_dropdown, skill_preset_dropdown, session_dropdown, session_preview_btn], spacing=10),
+        ft.Row([hotkey_switch, screenshot_btn, hotkey_btn, pick_path_btn, copypath_btn, ft.Container(width=20), ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)], spacing=10),
     ], expand=True, spacing=10)
 
-    return api_page, refresh_config_list
+    return api_page, refresh_config_list, refresh_preset_dropdowns

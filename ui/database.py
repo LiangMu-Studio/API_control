@@ -971,6 +971,36 @@ class MCPSkillLibrary:
 mcp_skill_library = MCPSkillLibrary(MCP_DB_FILE)
 
 
+def register_builtin_mcp():
+    """注册内置 MCP 服务器"""
+    import sys
+    # 获取内置 MCP 服务器路径
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+    else:
+        base_dir = Path(__file__).parent.parent
+    pathfixer_path = base_dir / 'mcp_servers' / 'pathfixer_server.py'
+    if not pathfixer_path.exists():
+        return
+    # 获取 Python 解释器路径
+    python_exe = sys.executable
+    # 注册到数据库（如果不存在）
+    existing = mcp_skill_library.get_mcp('pathfixer')
+    if not existing:
+        mcp_skill_library.add_mcp(
+            name='pathfixer',
+            command=python_exe,
+            args=str(pathfixer_path),
+            env='',
+            category='常用',
+            source='builtin',
+            description='内置路径修正工具 + 代理搜索/抓取'
+        )
+
+# 启动时注册内置 MCP
+register_builtin_mcp()
+
+
 def sync_tool_usage_from_history():
     """从历史记录增量同步 MCP/Skill 到管理库
 

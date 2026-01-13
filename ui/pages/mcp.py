@@ -787,58 +787,153 @@ def create_mcp_page(state):
         threading.Thread(target=run, daemon=True).start()
 
     def show_preset_manager(e):
-        """显示 MCP 预设管理对话框"""
-        presets = mcp_skill_library.get_all_mcp_presets()
-        preset_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=5)
+        """显示 MCP 预设管理对话框 - 左右分栏布局"""
+        selected_preset = [None]  # 当前选中的预设名称
+        preset_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=2, expand=True)
+        content_list = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=2, expand=True)
+        content_title = ft.Text(L.get('preset_select_group', '请选择分组'), weight=ft.FontWeight.BOLD)
 
         def refresh_preset_list():
             preset_list.controls.clear()
-            for p in mcp_skill_library.get_all_mcp_presets():
+            presets = mcp_skill_library.get_all_mcp_presets()
+            for p in presets:
                 is_default = p.get('is_default', False)
+                is_selected = selected_preset[0] == p['name']
                 preset_list.controls.append(ft.Container(
                     ft.Row([
                         ft.Icon(ft.Icons.STAR if is_default else ft.Icons.STAR_BORDER,
-                               color=ft.Colors.AMBER if is_default else ft.Colors.GREY),
-                        ft.Text(p['name'], expand=True),
-                        ft.Text(f"({len(p.get('mcp_names', []))})", color=ft.Colors.GREY_600),
-                        ft.IconButton(ft.Icons.DELETE, on_click=lambda e, n=p['name']: delete_preset(n)),
-                    ]),
-                    padding=5, border_radius=4,
-                    bgcolor=ft.Colors.BLUE_50 if is_default else None,
+                               color=ft.Colors.AMBER if is_default else ft.Colors.GREY, size=18),
+                        ft.Text(p['name'], expand=True, weight=ft.FontWeight.BOLD if is_selected else None),
+                        ft.Text(f"({len(p.get('mcp_names', []))})", color=ft.Colors.GREY_600, size=12),
+                    ], spacing=5),
+                    padding=ft.padding.symmetric(5, 8), border_radius=4,
+                    bgcolor=ft.Colors.BLUE_100 if is_selected else (ft.Colors.BLUE_50 if is_default else None),
+                    on_click=lambda ev, n=p['name']: select_preset(n),
                 ))
             state.page.update()
 
-        def delete_preset(name):
-            mcp_skill_library.delete_mcp_preset(name)
-            refresh_preset_list()
-            show_snackbar(state.page, L.get('preset_deleted', '预设已删除'))
+        def refresh_content_list():
+            content_list.controls.clear()
+            if not selected_preset[0]:
+                content_title.value = L.get('preset_select_group', '请选择分组')
+                state.page.update()
+                return
+            preset = next((p for p in mcp_skill_library.get_all_mcp_presets() if p['name'] == selected_preset[0]), None)
+            if not preset:
+                return
+            content_title.value = f"{L.get('preset_content', '分组内容')}: {preset['name']}"
+            selected_names = set(preset.get('mcp_names', []))
+            all_mcps = mcp_skill_library.get_all_mcp()
 
-        def create_preset(e):
+            # 按分类分组
+            by_category = {}
+            for m in all_mcps:
+                cat = m.get('category', '其他')
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(m)
+
+            # 遍历所有分类（先按 MCP_CATEGORIES 顺序，再显示其他分类）
+            all_cats = list(MCP_CATEGORIES) + [c for c in by_category.keys() if c not in MCP_CATEGORIES]
+            for cat in all_cats:
+                if cat not in by_category:
+                    continue
+                items = by_category[cat]
+                # 分类标题
+                content_list.controls.append(ft.Container(
+                    ft.Row([
+                        ft.Icon(ft.Icons.FOLDER, color=ft.Colors.AMBER, size=16),
+                        ft.Text(cat, weight=ft.FontWeight.BOLD, size=13),
+                        ft.Text(f"({len(items)})", color=ft.Colors.GREY_600, size=11),
+                    ], spacing=5),
+                    padding=ft.padding.only(top=8, bottom=4),
+                ))
+                # MCP 列表
+                for m in items:
+                    mcp_name = m['name']
+                    cb = ft.Checkbox(
+                        value=mcp_name in selected_names, label=mcp_name,
+                        on_change=lambda ev, n=mcp_name: toggle_mcp_in_preset(n, ev.control.value)
+                    )
+                    content_list.controls.append(ft.Container(cb, padding=ft.padding.only(left=20)))
+            state.page.update()
+
+        def select_preset(name):
+            selected_preset[0] = name
+            refresh_preset_list()
+            refresh_content_list()
+
+        def toggle_mcp_in_preset(mcp_name, checked):
+            if not selected_preset[0]:
+                return
+            preset = next((p for p in mcp_skill_library.get_all_mcp_presets() if p['name'] == selected_preset[0]), None)
+            if not preset:
+                return
+            names = set(preset.get('mcp_names', []))
+            if checked:
+                names.add(mcp_name)
+            else:
+                names.discard(mcp_name)
+            mcp_skill_library.add_mcp_preset(selected_preset[0], list(names), preset.get('is_default', False))
+            refresh_preset_list()
+
+        def create_preset(ev):
             name = name_field.value.strip()
             if not name:
                 return
-            # 从数据库获取默认的 MCP
-            selected = [m['name'] for m in mcp_skill_library.get_default_mcps()]
-            mcp_skill_library.add_mcp_preset(name, selected)
+            mcp_skill_library.add_mcp_preset(name, [])
             name_field.value = ''
+            selected_preset[0] = name
             refresh_preset_list()
+            refresh_content_list()
             show_snackbar(state.page, L.get('preset_created', '预设已创建'))
 
-        name_field = ft.TextField(label=L.get('preset_name', '预设名称'), width=200)
+        def set_default_preset(ev):
+            if not selected_preset[0]:
+                return
+            preset = next((p for p in mcp_skill_library.get_all_mcp_presets() if p['name'] == selected_preset[0]), None)
+            if preset:
+                mcp_skill_library.add_mcp_preset(selected_preset[0], preset.get('mcp_names', []), is_default=True)
+                refresh_preset_list()
+                show_snackbar(state.page, L.get('preset_default_set', '已设为默认预设'))
+
+        def delete_preset(ev):
+            if not selected_preset[0]:
+                return
+            mcp_skill_library.delete_mcp_preset(selected_preset[0])
+            selected_preset[0] = None
+            refresh_preset_list()
+            refresh_content_list()
+            show_snackbar(state.page, L.get('preset_deleted', '预设已删除'))
+
+        name_field = ft.TextField(label=L.get('preset_name', '预设名称'), width=140, dense=True)
         refresh_preset_list()
+
+        # 左侧面板：分组列表
+        left_panel = ft.Container(
+            ft.Column([
+                ft.Row([name_field, ft.IconButton(ft.Icons.ADD, on_click=create_preset, tooltip=L['add'])], spacing=5),
+                ft.Divider(height=10),
+                preset_list,
+                ft.Divider(height=10),
+                ft.Row([
+                    ft.IconButton(ft.Icons.STAR_BORDER, on_click=set_default_preset, tooltip=L.get('set_default', '设为默认')),
+                    ft.IconButton(ft.Icons.DELETE, on_click=delete_preset, tooltip=L['delete']),
+                ], spacing=5),
+            ], spacing=5),
+            width=200, padding=10, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8,
+        )
+
+        # 右侧面板：分组内容
+        right_panel = ft.Container(
+            ft.Column([content_title, ft.Divider(height=10), content_list], spacing=5),
+            width=280, padding=10, border=ft.border.all(1, ft.Colors.GREY_300), border_radius=8,
+        )
 
         dlg = ft.AlertDialog(
             title=ft.Text(L.get('preset_manage', '管理预设')),
-            content=ft.Container(
-                ft.Column([
-                    ft.Row([name_field, ft.ElevatedButton(L['add'], on_click=create_preset)]),
-                    ft.Text(L.get('preset_select_items', '选择项目') + ': ' + L.get('mcp_default_hint', '勾选设为默认'),
-                           size=11, color=ft.Colors.GREY_600),
-                    ft.Container(preset_list, height=250),
-                ], spacing=10),
-                width=400
-            ),
-            actions=[ft.TextButton(L['close'], on_click=lambda e: state.page.close(dlg))],
+            content=ft.Container(ft.Row([left_panel, right_panel], spacing=10), height=400),
+            actions=[ft.TextButton(L['close'], on_click=lambda ev: state.page.close(dlg))],
         )
         state.page.open(dlg)
 
@@ -910,9 +1005,10 @@ def create_mcp_page(state):
     mcp_page = ft.Column([
         ft.Row([
             ft.Text(L['mcp'], size=20, weight=ft.FontWeight.BOLD),
+            ft.IconButton(ft.Icons.BOOKMARKS, on_click=show_preset_manager, tooltip=L.get('preset_manage', '管理预设')),
             ft.IconButton(ft.Icons.ADD, on_click=add_mcp, tooltip=L['add']),
             ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=show_source_menu, tooltip=L.get('mcp_source', '获取来源')),
-            ft.IconButton(ft.Icons.MORE_HORIZ, on_click=show_more_menu, tooltip=L.get('more', '更多')),
+            ft.IconButton(ft.Icons.HEALTH_AND_SAFETY, on_click=check_mcp_status, tooltip=L.get('mcp_check_status', '检测状态')),
             ft.IconButton(ft.Icons.EDIT, on_click=edit_mcp, tooltip=L['edit']),
             ft.IconButton(ft.Icons.DELETE, on_click=delete_mcp, tooltip=L['delete']),
         ]),

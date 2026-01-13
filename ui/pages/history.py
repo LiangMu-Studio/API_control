@@ -542,30 +542,51 @@ def create_history_page(state):
                     show_snackbar(state.page, "消息缺少 UUID")
                     return
 
-                # 构建 parentUuid 索引（一次遍历）
-                children_map = {}  # {parent_uuid: [child_uuids]}
+                # 获取下一轮的起始 UUID（用于确定删除边界）
+                next_round_uuid = None
+                if round_idx + 1 < len(rounds_in_ui):
+                    next_user, _ = rounds_in_ui[round_idx + 1]
+                    if next_user:
+                        next_round_uuid = next_user.get('uuid')
+
+                # 获取当前轮次之前的最后一条消息 UUID（用于修复 parentUuid）
+                prev_uuid = user_msg.get('parentUuid')  # 当前轮 user 的父消息
+
+                # 构建 parentUuid 索引
+                children_map = {}
                 for msg in original_messages:
                     parent = msg.get('parentUuid')
                     if parent:
                         children_map.setdefault(parent, []).append(msg.get('uuid'))
 
-                # 递归收集所有后代 UUID
+                # 收集当前轮次的所有消息（到下一轮边界为止）
                 uuids_to_delete = set()
-                def collect_descendants(uuid):
-                    if uuid and uuid not in uuids_to_delete:
-                        uuids_to_delete.add(uuid)
-                        for child in children_map.get(uuid, []):
-                            collect_descendants(child)
+                def collect_round_messages(uuid):
+                    if not uuid or uuid in uuids_to_delete:
+                        return
+                    if uuid == next_round_uuid:  # 遇到下一轮边界，停止
+                        return
+                    uuids_to_delete.add(uuid)
+                    for child in children_map.get(uuid, []):
+                        collect_round_messages(child)
 
-                collect_descendants(start_uuid)
+                collect_round_messages(start_uuid)
 
-                # 过滤消息（删除后代 + 关联的 file-history-snapshot，保留 system）
-                new_messages = [
-                    msg for msg in original_messages
-                    if msg.get('uuid') not in uuids_to_delete
-                    and not (msg.get('type') == 'file-history-snapshot'
-                             and (msg.get('messageId') or msg.get('snapshot', {}).get('messageId')) in uuids_to_delete)
-                ]
+                # 过滤消息并修复 parentUuid
+                new_messages = []
+                for msg in original_messages:
+                    uuid = msg.get('uuid')
+                    if uuid in uuids_to_delete:
+                        continue
+                    if msg.get('type') == 'file-history-snapshot':
+                        mid = msg.get('messageId') or msg.get('snapshot', {}).get('messageId')
+                        if mid in uuids_to_delete:
+                            continue
+                    # 修复下一轮第一条消息的 parentUuid
+                    if uuid == next_round_uuid and msg.get('parentUuid') in uuids_to_delete:
+                        msg = dict(msg)  # 复制避免修改原对象
+                        msg['parentUuid'] = prev_uuid
+                    new_messages.append(msg)
 
                 # 写回文件
                 with open(file_path, 'w', encoding='utf-8') as f:

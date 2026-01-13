@@ -89,6 +89,11 @@ jobs:
             --hidden-import anthropic \
             main.py
 
+      - name: Copy data files
+        run: |
+          cp -r dist/AI-CLI-Manager/_internal/mcp_data dist/AI-CLI-Manager/
+          cp dist/AI-CLI-Manager/_internal/icon.ico dist/AI-CLI-Manager/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -136,6 +141,11 @@ jobs:
             --hidden-import httpx \
             --hidden-import anthropic \
             main.py
+
+      - name: Copy data files
+        run: |
+          cp -r dist/AI-CLI-Manager/_internal/mcp_data dist/AI-CLI-Manager/
+          cp dist/AI-CLI-Manager/_internal/icon.ico dist/AI-CLI-Manager/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

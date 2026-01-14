@@ -157,7 +157,7 @@ fn load_session_paginated(
 
 /// 搜索会话
 #[pyfunction]
-#[pyo3(signature = (cli_type, keyword, limit=50))]
+#[pyo3(signature = (cli_type, keyword, limit=1000))]
 fn search(cli_type: &str, keyword: &str, limit: usize) -> PyResult<Vec<SessionInfo>> {
     match cli_type {
         "claude" => {

@@ -513,7 +513,12 @@ impl CliHistoryProvider for ClaudeProvider {
                         Ok(l) => l,
                         Err(_) => continue,
                     };
-                    if line.to_lowercase().contains(&keyword_lower) {
+                    // 跳过工具调用行
+                    if line.contains("\"tool_use\"") || line.contains("\"tool_result\"") {
+                        continue;
+                    }
+                    // 只在包含 "text" 字段的行中搜索
+                    if line.contains("\"text\"") && line.to_lowercase().contains(&keyword_lower) {
                         return self.parse_session_info(file_path);
                     }
                 }

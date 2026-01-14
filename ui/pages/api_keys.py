@@ -1529,6 +1529,51 @@ def create_api_page(state):
         page.update()
         show_snackbar(page, L.get('terminal_deleted', '已删除终端: {}').format(name))
 
+    def add_terminal_click(e):
+        """添加自定义终端"""
+        name_field = ft.TextField(label=L.get('terminal_name', '终端名称'), expand=True)
+        path_field = ft.TextField(label=L.get('terminal_path', '终端路径/命令'), expand=True)
+
+        def browse_terminal(e):
+            def on_result(result):
+                if result.files:
+                    path_field.value = result.files[0].path
+                    # 自动填充名称
+                    if not name_field.value:
+                        name_field.value = Path(result.files[0].path).stem
+                    page.update()
+            file_picker.on_result = on_result
+            file_picker.pick_files(allowed_extensions=['exe'] if sys.platform == 'win32' else None)
+
+        def save_terminal(e):
+            name = name_field.value.strip()
+            path = path_field.value.strip()
+            if not name or not path:
+                show_snackbar(page, L['fill_required'])
+                return
+            state.terminals[name] = path
+            state.settings['terminals_cache'] = state.terminals
+            save_settings(state.settings)
+            terminal_dropdown.options = [ft.dropdown.Option(k) for k in state.terminals.keys()]
+            terminal_dropdown.value = name
+            page.close(dlg)
+            page.update()
+            show_snackbar(page, L.get('terminal_added', '已添加终端: {}').format(name))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text(L.get('add_terminal', '+ 添加终端')),
+            content=ft.Column([
+                name_field,
+                ft.Row([path_field, ft.IconButton(ft.Icons.FOLDER_OPEN, on_click=browse_terminal)]),
+                ft.Text(L.get('terminal_path_hint', '可输入命令名(如 pwsh)或完整路径'), size=12, color=ft.Colors.GREY_500),
+            ], tight=True, spacing=10, width=400),
+            actions=[
+                ft.TextButton(L['cancel'], on_click=lambda e: page.close(dlg)),
+                ft.ElevatedButton(L['save'], on_click=save_terminal),
+            ],
+        )
+        page.open(dlg)
+
     def refresh_envs_click(e):
         state.python_envs = detect_python_envs()
         state.settings['envs_cache'] = state.python_envs
@@ -1781,6 +1826,42 @@ def create_api_page(state):
         # 记录启动日志
         from core.cli_logger import log_cli_launch
         log_cli_launch(cfg.get('label', ''), cli_type, cli_cmd, cwd)
+
+    def open_in_embedded_terminal(e):
+        """在嵌入式终端中打开 CLI"""
+        if state.selected_config is None:
+            show_snackbar(page, L['no_selection'])
+            return
+        cfg = state.configs[state.selected_config]
+        cli_type = cfg.get('cli_type') or 'claude'
+        cli_info = CLI_TOOLS.get(cli_type, CLI_TOOLS['claude'])
+        api_key = cfg.get('provider', {}).get('credentials', {}).get('api_key', '')
+        key_name = cfg.get('provider', {}).get('key_name', cli_info['default_key_name'])
+        endpoint = cfg.get('provider', {}).get('endpoint', '')
+        base_url_env = cfg.get('provider', {}).get('base_url_env', cli_info['base_url_env'])
+        selected_model = cfg.get('provider', {}).get('selected_model', '')
+
+        # 构建环境变量
+        env = {key_name: api_key}
+        if endpoint:
+            env[base_url_env] = endpoint
+
+        # 构建命令
+        cli_cmd = cli_info.get('command', 'claude')
+        if selected_model:
+            cli_cmd = f"{cli_cmd} --model {selected_model}"
+
+        # 会话恢复
+        session_id = session_dropdown.value
+        if cli_type == 'claude' and session_id and session_id != '__none__':
+            cli_cmd = f"{cli_cmd} --resume {session_id}"
+
+        # 调用嵌入式终端
+        if hasattr(state, 'run_cli_in_terminal'):
+            state.run_cli_in_terminal(cli_cmd, env)
+            show_snackbar(page, L.get('opened_in_terminal', '已在终端面板中打开'))
+        else:
+            show_snackbar(page, L.get('terminal_not_ready', '终端页面未初始化，请先访问终端页'))
 
     def apply_selected_prompt(e=None):
         """应用选中的提示词"""
@@ -2125,17 +2206,18 @@ def create_api_page(state):
         ft.Text(L['terminal'], size=16, weight=ft.FontWeight.BOLD),
         ft.Row([
             terminal_dropdown,
+            ft.IconButton(ft.Icons.ADD, tooltip=L.get('add_terminal', '+ 添加终端'), on_click=add_terminal_click),
             ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip=L.get('delete_terminal', '删除终端'), on_click=delete_terminal_click),
             ft.TextButton(L['refresh_terminals'], icon=ft.Icons.REFRESH, on_click=refresh_terminals_click),
             python_env_dropdown,
             ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip=L.get('delete_env', '删除环境'), on_click=delete_env_click),
             ft.TextButton(L['refresh_envs'], icon=ft.Icons.REFRESH, on_click=refresh_envs_click),
-            ft.Text(L['current_key']), current_key_label,
         ], wrap=True, spacing=5),
         ft.Row([work_dir_input, work_dir_menu, ft.ElevatedButton(L['browse'], icon=ft.Icons.FOLDER_OPEN, on_click=browse_folder),
                 ft.IconButton(ft.Icons.DELETE_SWEEP, tooltip=L.get('clear_folder_history', '清空本文件夹历史记录'), on_click=clear_workdir_history)]),
         ft.Row([prompt_dropdown, mcp_preset_dropdown, skill_preset_dropdown, session_dropdown, session_preview_btn], spacing=10),
-        ft.Row([hotkey_switch, screenshot_btn, hotkey_btn, pick_path_btn, copypath_btn, ft.Container(width=20), ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)], spacing=10),
+        ft.Row([hotkey_switch, screenshot_btn, hotkey_btn, pick_path_btn, copypath_btn, ft.Container(width=20), ft.Text(L['current_key']), current_key_label,
+                ft.ElevatedButton(L['open_terminal'], icon=ft.Icons.TERMINAL, on_click=open_terminal)], spacing=10),
     ], expand=True, spacing=10)
 
     return api_page, refresh_config_list, refresh_preset_dropdowns

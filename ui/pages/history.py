@@ -74,6 +74,8 @@ def create_history_page(state):
     selected_session_data = [None]  # 当前选中的会话数据
     loaded_projects = OrderedDict()  # LRU 缓存
     show_sidebar = [True]  # 侧边栏显示状态
+    search_highlight = [None]  # 当前搜索高亮关键词
+    is_loading = [False]  # 防止连续点击卡死
 
     # 工具图标和颜色映射 - 复刻 DEV 版
     TOOL_ICONS = {
@@ -152,6 +154,41 @@ def create_history_page(state):
         turns, _ = analyze_session(messages)
         return turns
 
+    def find_match_round(messages, keyword):
+        """找到包含关键词的第一个轮次索引（只搜索用户提问和AI文字回复）"""
+        if not keyword:
+            return -1
+        kw_lower = keyword.lower()
+
+        def msg_has_keyword(msg):
+            """检查消息文本是否包含关键词"""
+            role, txt, _, _ = extract_content(msg)
+            return txt and kw_lower in txt.lower()
+
+        rounds = []
+        current_round = None
+        orphan_msgs = []
+        for msg in messages:
+            role, _, _, is_real_user = extract_content(msg)
+            if role == 'user' and is_real_user:
+                if current_round:
+                    rounds.append(current_round)
+                current_round = (msg, [msg])
+            elif current_round:
+                current_round[1].append(msg)
+            else:
+                orphan_msgs.append(msg)
+        if current_round:
+            rounds.append(current_round)
+        if orphan_msgs:
+            rounds.insert(0, (None, orphan_msgs))
+
+        for i, (user_msg, msgs) in enumerate(rounds):
+            for msg in msgs:
+                if msg_has_keyword(msg):
+                    return i
+        return -1
+
     # ==================== 左侧边栏 - 项目树 ====================
     sidebar_container = ft.Container(width=320, visible=True)
     project_list = ft.Column([], scroll=ft.ScrollMode.AUTO, expand=True, spacing=0)
@@ -226,7 +263,7 @@ def create_history_page(state):
         for sid, info in sorted(sessions.items(), key=lambda x: x[1].get('last_timestamp', ''), reverse=True):
             ts = info.get('last_timestamp', '')
             try:
-                time_str = datetime.fromisoformat(ts.replace('Z', '+00:00')).strftime('%m-%d %H:%M') if ts else ''
+                time_str = datetime.fromisoformat(ts.replace('Z', '+00:00')).astimezone().strftime('%m-%d %H:%M') if ts else ''
             except (ValueError, AttributeError):
                 time_str = ts[:16] if ts else ''
             turns = count_real_turns(info.get('messages', []))
@@ -255,6 +292,8 @@ def create_history_page(state):
         old_session_id = selected_session_id[0]
         selected_session_id[0] = session_id
         selected_session_data[0] = {'session_id': session_id, 'info': info, 'group': project_id}
+        search_highlight[0] = None  # 清除搜索高亮
+        scroll_to_round[0] = None  # 清除滚动目标
         show_session_detail(info, session_id, project_cwd)
 
         # 增量更新选中状态（不重建整个列表）
@@ -280,6 +319,7 @@ def create_history_page(state):
 
     # 分页状态
     load_state = {'head': 3, 'tail': 3}
+    scroll_to_round = [None]  # 需要滚动到的轮次索引
 
     def toggle_sidebar(_):
         """切换侧边栏显示"""
@@ -352,6 +392,36 @@ def create_history_page(state):
             return
 
         head_n, tail_n = load_state['head'], load_state['tail']
+        target_idx = scroll_to_round[0]
+
+        # 搜索模式：只显示匹配轮次
+        if target_idx is not None and 0 <= target_idx < total:
+            # 前面折叠
+            if target_idx > 0:
+                messages_container.controls.append(ft.Container(
+                    ft.Row([
+                        ft.ElevatedButton(
+                            f"↑ 展开前 {target_idx} 轮",
+                            on_click=lambda _: expand_before(target_idx, messages),
+                            bgcolor=ft.Colors.BLUE_500, color=ft.Colors.WHITE),
+                    ], alignment=ft.MainAxisAlignment.CENTER),
+                    padding=ft.padding.symmetric(vertical=8),
+                ))
+            # 显示匹配轮次
+            messages_container.controls.extend(render_round(rounds[target_idx], target_idx + 1, target_idx, messages))
+            # 后面折叠
+            after_count = total - target_idx - 1
+            if after_count > 0:
+                messages_container.controls.append(ft.Container(
+                    ft.Row([
+                        ft.ElevatedButton(
+                            f"↓ 展开后 {after_count} 轮",
+                            on_click=lambda _: expand_after(target_idx, messages),
+                            bgcolor=ft.Colors.BLUE_500, color=ft.Colors.WHITE),
+                    ], alignment=ft.MainAxisAlignment.CENTER),
+                    padding=ft.padding.symmetric(vertical=8),
+                ))
+            return
 
         if head_n + tail_n >= total:
             # 全部显示
@@ -388,15 +458,35 @@ def create_history_page(state):
             state.page.update()
         state.page.run_thread(do_update)
 
+    def expand_before(target_idx, messages):
+        """展开搜索结果前面的轮次"""
+        scroll_to_round[0] = None  # 退出搜索模式
+        load_state['head'], load_state['tail'] = target_idx + 3, 3
+        build_message_timeline(messages)
+        state.page.update()
+
+    def expand_after(target_idx, messages):
+        """展开搜索结果后面的轮次"""
+        scroll_to_round[0] = None  # 退出搜索模式
+        load_state['head'], load_state['tail'] = target_idx + 1, 100
+        build_message_timeline(messages)
+        state.page.update()
+
     def render_round(round_data, round_num, round_idx, all_messages):
         """渲染一轮对话 - 复刻 DEV 版时间线样式"""
         user_msg, ai_msgs = round_data
         controls = []
 
+        # 检查是否是需要滚动到的轮次
+        is_target = scroll_to_round[0] == round_idx
+
         # 用户消息
         if user_msg:
             _, txt, _, _ = extract_content(user_msg)
-            controls.append(render_timeline_message(txt, 'user', round_num, round_idx, all_messages))
+            msg_ctrl = render_timeline_message(txt, 'user', round_num, round_idx, all_messages)
+            if is_target:
+                msg_ctrl.key = "search_target"
+            controls.append(msg_ctrl)
 
         # AI 响应
         for msg in ai_msgs:
@@ -434,7 +524,12 @@ def create_history_page(state):
         line = ft.Container(width=2, height=40, bgcolor=line_color)
 
         # 消息气泡
-        display_text = text[:500] if len(text) > 500 else text
+        kw = search_highlight[0]
+        # 搜索模式下显示完整内容，否则截断
+        if kw and kw.lower() in text.lower():
+            display_text = text  # 完整显示
+        else:
+            display_text = text[:500] + ('...' if len(text) > 500 else '')
         prefix = f"[{L.get('round', '轮')}{round_num}] " if round_num else ""
 
         # 标签行（包含删除按钮）
@@ -459,20 +554,46 @@ def create_history_page(state):
                 on_click=on_delete_round,
             ))
 
+        # 构建消息内容（支持高亮）
+        full_text = prefix + display_text
+        has_match = kw and kw.lower() in full_text.lower()
+        if has_match:
+            # 高亮关键词
+            import re
+            parts = re.split(f'({re.escape(kw)})', full_text, flags=re.IGNORECASE)
+            spans = []
+            for p in parts:
+                if p.lower() == kw.lower():
+                    spans.append(ft.TextSpan(p, ft.TextStyle(bgcolor=ft.Colors.YELLOW_200, color=ft.Colors.BLACK)))
+                else:
+                    spans.append(ft.TextSpan(p))
+            content_text = ft.Text(spans=spans, size=12, selectable=True)
+        else:
+            content_text = ft.Text(full_text, size=12, selectable=True)
+
+        # 匹配的消息用醒目边框
+        bubble_border = ft.border.all(3, ft.Colors.ORANGE_400) if has_match else ft.border.only(left=ft.BorderSide(4, border_color))
+
         bubble = ft.Container(
             ft.Column([
                 ft.Row(label_row_items, spacing=4),
-                ft.Text(prefix + display_text, size=12, selectable=True),
+                content_text,
             ], spacing=6),
             bgcolor=bubble_bg, padding=12, border_radius=8,
-            border=ft.border.only(left=ft.BorderSide(4, border_color)),
+            border=bubble_border,
             expand=True,
         )
 
-        return ft.Row([
+        row = ft.Row([
             ft.Column([avatar, line], spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             bubble,
         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
+
+        # 给匹配的消息添加 key 用于滚动
+        if has_match:
+            row.key = "highlight_target"
+
+        return row
 
     def delete_round(round_idx, all_messages):
         """删除指定轮次的对话"""
@@ -831,6 +952,8 @@ def create_history_page(state):
     def do_search(keyword: str):
         """搜索会话内容"""
         if not keyword.strip():
+            search_highlight[0] = None  # 清除高亮
+            scroll_to_round[0] = None  # 清除滚动目标
             refresh_project_list('')
             return
 
@@ -842,35 +965,77 @@ def create_history_page(state):
         try:
             import liangmu_history as lh
             kw = keyword.strip()
-            results = lh.search(current_cli, kw, 50)
+            results = lh.search(current_cli, kw)  # Rust 层已过滤工具调用
             if not results:
                 project_list.controls.append(ft.Text(f"未找到 '{keyword}'", color=ft.Colors.GREY_500))
                 state.page.update()
                 return
 
-            stats_text.value = f"找到 {len(results)} 个会话"
-
             # 只显示会话列表，不加载内容（避免卡顿）
+            # 过滤掉 agent 文件，并按 cwd 去重（忽略大小写）
+            seen_cwd = set()
+            filtered_count = 0
             for r in results:
+                # 跳过 agent 文件
+                if r.id.startswith('agent-'):
+                    continue
+                # 按 cwd 去重（忽略大小写）
+                cwd = r.cwd or r.id
+                cwd_key = cwd.lower()
+                if cwd_key in seen_cwd:
+                    continue
+                seen_cwd.add(cwd_key)
+                filtered_count += 1
+
                 fp = Path(r.file_path)
                 pid = fp.parent.name if fp.parent else r.id
-                cwd = r.cwd or pid
 
                 def make_click_handler(project_id, session_id, cwd_path, search_kw):
                     def handler(_):
-                        # 点击后加载会话
-                        mgr = get_current_manager()
-                        if mgr:
-                            sessions = mgr.load_project(project_id)
-                            if session_id in sessions:
-                                info = sessions[session_id]
-                                selected_session_id[0] = session_id
-                                selected_session_data[0] = info
-                                load_state['head'], load_state['tail'] = 100, 100
-                                build_message_timeline(info['messages'])
-                                detail_header.controls.clear()
-                                detail_header.controls.append(ft.Text(f"📁 {cwd_path} (搜索: {search_kw})", size=12, color=ft.Colors.GREY_600))
-                                state.page.update()
+                        # 防止连续点击卡死
+                        if is_loading[0]:
+                            return
+                        is_loading[0] = True
+                        try:
+                            # 点击后加载会话
+                            mgr = get_current_manager()
+                            if mgr:
+                                sessions = mgr.load_project(project_id)
+                                if session_id in sessions:
+                                    info = sessions[session_id]
+                                    selected_session_id[0] = session_id
+                                    selected_session_data[0] = info
+                                    search_highlight[0] = search_kw  # 设置高亮关键词
+
+                                    # 找到包含关键词的轮次索引
+                                    messages = info.get('messages', [])
+                                    match_idx = find_match_round(messages, search_kw)
+
+                                    # 如果文字内容中找不到关键词，提示用户
+                                    if match_idx < 0:
+                                        detail_panel.controls.clear()
+                                        detail_panel.controls.append(
+                                            ft.Text(f"文字内容中未找到 '{search_kw}'（可能在工具调用中）",
+                                                    color=ft.Colors.ORANGE, size=12))
+                                        detail_header.controls.clear()
+                                        detail_header.controls.append(
+                                            ft.Text(f"📁 {cwd_path}", size=12, color=ft.Colors.GREY_600))
+                                        state.page.update()
+                                        return
+
+                                    scroll_to_round[0] = match_idx  # 触发搜索模式
+
+                                    build_message_timeline(messages)
+                                    detail_header.controls.clear()
+                                    detail_header.controls.append(
+                                        ft.Text(f"📁 {cwd_path} (搜索: {search_kw})",
+                                                size=12, color=ft.Colors.GREY_600))
+                                    state.page.update()
+
+                                    # 滚动到高亮消息
+                                    detail_panel.scroll_to(key="highlight_target", duration=200)
+                        finally:
+                            is_loading[0] = False
                     return handler
 
                 display = cwd[-60:] if len(cwd) > 60 else cwd
@@ -878,11 +1043,12 @@ def create_history_page(state):
                     ft.Text(display, size=12, color=ft.Colors.BLUE_400),
                     padding=8,
                     border_radius=4,
-                    bgcolor=ft.Colors.GREY_900,
                     on_click=make_click_handler(pid, r.id, cwd, kw),
                     ink=True
                 ))
 
+            # 更新为过滤后的数量
+            stats_text.value = f"找到 {filtered_count} 个会话"
             state.page.update()
         except Exception as e:
             project_list.controls.append(ft.Text(f"搜索失败: {e}", color=ft.Colors.RED))

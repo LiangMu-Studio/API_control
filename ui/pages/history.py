@@ -673,36 +673,33 @@ def create_history_page(state):
                 # 获取当前轮次之前的最后一条消息 UUID（用于修复 parentUuid）
                 prev_uuid = user_msg.get('parentUuid')  # 当前轮 user 的父消息
 
-                # 构建 parentUuid 索引
-                children_map = {}
-                for msg in original_messages:
-                    parent = msg.get('parentUuid')
-                    if parent:
-                        children_map.setdefault(parent, []).append(msg.get('uuid'))
+                # 基于位置删除：找到起始和结束索引
+                start_idx = None
+                end_idx = len(original_messages)
+                for i, msg in enumerate(original_messages):
+                    if msg.get('uuid') == start_uuid:
+                        start_idx = i
+                    elif next_round_uuid and msg.get('uuid') == next_round_uuid:
+                        end_idx = i
+                        break
 
-                # 收集当前轮次的所有消息（到下一轮边界为止）- 使用迭代避免栈溢出
+                if start_idx is None:
+                    show_snackbar(state.page, "找不到轮次起始消息")
+                    return
+
+                # 收集要删除的 UUID（用于统计）
                 uuids_to_delete = set()
-                stack = [start_uuid]
-                while stack:
-                    uuid = stack.pop()
-                    if not uuid or uuid in uuids_to_delete or uuid == next_round_uuid:
-                        continue
-                    uuids_to_delete.add(uuid)
-                    stack.extend(children_map.get(uuid, []))
+                for i in range(start_idx, end_idx):
+                    uuid = original_messages[i].get('uuid')
+                    if uuid:
+                        uuids_to_delete.add(uuid)
 
-                # 过滤消息并修复 parentUuid
-                new_messages = []
-                for msg in original_messages:
-                    uuid = msg.get('uuid')
-                    if uuid in uuids_to_delete:
-                        continue
-                    if msg.get('type') == 'file-history-snapshot':
-                        mid = msg.get('messageId') or msg.get('snapshot', {}).get('messageId')
-                        if mid in uuids_to_delete:
-                            continue
-                    # 修复下一轮第一条消息的 parentUuid
-                    if uuid == next_round_uuid and msg.get('parentUuid') in uuids_to_delete:
-                        msg = dict(msg)  # 复制避免修改原对象
+                # 基于位置过滤消息，并修复所有断裂的 parentUuid 链接
+                new_messages = list(original_messages[:start_idx])
+                for msg in original_messages[end_idx:]:
+                    # 如果 parentUuid 指向已删除的消息，修复为 prev_uuid
+                    if msg.get('parentUuid') in uuids_to_delete:
+                        msg = dict(msg)
                         msg['parentUuid'] = prev_uuid
                     new_messages.append(msg)
 
